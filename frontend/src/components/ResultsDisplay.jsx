@@ -43,9 +43,24 @@ const ResultsDisplay = ({ results, isLoading }) => {
                                         <div className="shop-name">
                                             {offer.rank === 1 && <span style={{ marginRight: '8px' }}>🏆</span>}
                                             {offer.isHealthRise && <span style={{ marginRight: '8px' }}>⭐</span>}
-                                            {offer.shop} <span className="rank-badge">(Platz {offer.rank})</span>
+                                            {offer.shop} <span className="rank-badge">(Platz {offer.rank}{offer.diff?.oldRank ? ` ← ${offer.diff.oldRank}` : ''})</span>
                                         </div>
-                                        <div className="price">{offer.price} €</div>
+                                        <div className="price-container" style={{ textAlign: 'right' }}>
+                                            <div className="price">{offer.price} €</div>
+                                            {offer.diff?.oldPrice && (
+                                                <div className="price-diff" style={{
+                                                    fontSize: '0.8rem',
+                                                    marginTop: '0.25rem',
+                                                    color: parseFloat(offer.price.replace(',', '.')) < parseFloat(offer.diff.oldPrice.replace(',', '.'))
+                                                        ? 'var(--success-color)'
+                                                        : parseFloat(offer.price.replace(',', '.')) > parseFloat(offer.diff.oldPrice.replace(',', '.'))
+                                                            ? 'var(--error-color)'
+                                                            : 'var(--text-muted)'
+                                                }}>
+                                                    Vorher: {offer.diff.oldPrice} €
+                                                </div>
+                                            )}
+                                        </div>
                                     </div>
                                 ))}
                             </div>

@@ -1,12 +1,19 @@
-import React from 'react';
+import React, { useState } from 'react';
 
-const ScraperForm = ({ urlInput, setUrlInput, handleSubmit, isLoading, error }) => {
+const ScraperForm = ({ savedUrlsCount, handleSubmit, isLoading, error }) => {
+    const [urlInput, setUrlInput] = useState('');
+
+    const onSubmit = (e) => {
+        e.preventDefault();
+        handleSubmit(urlInput);
+    };
+
     return (
         <div className="glass-panel">
-            <form onSubmit={handleSubmit}>
+            <form onSubmit={onSubmit}>
                 <div className="input-group">
                     <label htmlFor="urls" className="input-label">
-                        Idealo URLs eingeben (eine pro Zeile oder durch Komma getrennt)
+                        Weitere Idealo URLs für diesen Lauf eingeben (optional)
                     </label>
                     <textarea
                         id="urls"
@@ -23,12 +30,12 @@ const ScraperForm = ({ urlInput, setUrlInput, handleSubmit, isLoading, error }) 
                 <button
                     type="submit"
                     className="submit-btn"
-                    disabled={isLoading || urlInput.trim().length === 0}
+                    disabled={isLoading || (savedUrlsCount === 0 && urlInput.trim().length === 0)}
                 >
                     {isLoading ? (
                         <>Scraping läuft...</>
                     ) : (
-                        <>Jetzt Scrapen</>
+                        <>Jetzt {savedUrlsCount > 0 ? `${savedUrlsCount} gespeicherte + weitere ` : ''}Scrapen</>
                     )}
                 </button>
             </form>
