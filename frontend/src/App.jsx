@@ -28,7 +28,7 @@ function App() {
     setResults(null)
 
     try {
-      const response = await fetch('http://127.0.0.1:3000/scrape', {
+      const response = await fetch('http://72.61.80.21:3000/scrape', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
