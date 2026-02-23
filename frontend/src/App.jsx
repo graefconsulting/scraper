@@ -3,6 +3,7 @@ import './index.css'
 import ScraperForm from './components/ScraperForm'
 import ResultsDisplay from './components/ResultsDisplay'
 import UrlManager from './components/UrlManager'
+import ProductEvaluation from './components/ProductEvaluation'
 
 function App() {
   const [activeTab, setActiveTab] = useState('scraper')
@@ -81,7 +82,12 @@ function App() {
           // Save to history
           const newHist = { date: Date.now() }
           const r1 = res.offers.find(o => o.rank === 1)
-          if (r1) newHist.rank1 = { price: r1.price, shop: r1.shop }
+          if (r1) {
+            newHist.rank1 = { price: r1.price, shop: r1.shop };
+            if (prev && prev.rank1) {
+              newHist.prevRank1Price = prev.rank1.price;
+            }
+          }
 
           const hr = res.offers.find(o => o.isHealthRise)
           if (hr) newHist.healthRise = { price: hr.price, rank: hr.rank, shop: hr.shop }
@@ -125,6 +131,12 @@ function App() {
         >
           URLs Verwalten ({savedUrls.length})
         </button>
+        <button
+          className={`tab-btn ${activeTab === 'evaluation' ? 'active' : ''}`}
+          onClick={() => setActiveTab('evaluation')}
+        >
+          Produktauswertung
+        </button>
       </div>
 
       {activeTab === 'scraper' && (
@@ -144,6 +156,10 @@ function App() {
 
       {activeTab === 'urls' && (
         <UrlManager savedUrls={savedUrls} setSavedUrls={setSavedUrls} />
+      )}
+
+      {activeTab === 'evaluation' && (
+        <ProductEvaluation savedUrls={savedUrls} results={results} />
       )}
     </div>
   )
