@@ -8,6 +8,9 @@ services:
     ports:
       - "3000:3000"
     restart: always
+    volumes:
+      - ./idealo_scraper/data.db:/app/data.db
+      - ./produkte.csv:/app/produkte.csv
 
   frontend:
     build:

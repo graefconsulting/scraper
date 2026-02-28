@@ -1,168 +1,58 @@
-import { useState, useEffect } from 'react'
-import './index.css'
-import ScraperForm from './components/ScraperForm'
-import ResultsDisplay from './components/ResultsDisplay'
-import UrlManager from './components/UrlManager'
-import ProductEvaluation from './components/ProductEvaluation'
+import React from 'react';
+import { Routes, Route, NavLink, Navigate } from 'react-router-dom';
+import { Activity, LineChart, Search, LayoutDashboard } from 'lucide-react';
+import Preisueberwachung from './pages/Preisueberwachung';
+import MarketResearch from './pages/MarketResearch';
 
-function App() {
-  const [activeTab, setActiveTab] = useState('scraper')
-  const [savedUrls, setSavedUrls] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('savedUrls') || '[]') } catch { return [] }
-  })
-  const [isLoading, setIsLoading] = useState(false)
-  const [results, setResults] = useState(null)
-  const [error, setError] = useState(null)
-
-  useEffect(() => {
-    localStorage.setItem('savedUrls', JSON.stringify(savedUrls))
-  }, [savedUrls])
-
-  const handleSubmit = async (additionalUrlsText = '') => {
-    // Parse URLs from textarea
-    const extraUrls = additionalUrlsText
-      .split(/[\n,]+/)
-      .map(url => url.trim())
-      .filter(url => url.length > 0)
-
-    const allUrls = [...new Set([...savedUrls.map(u => u.url), ...extraUrls])]
-
-    if (allUrls.length === 0) {
-      setError('Bitte mindestens eine URL eingeben oder unter URLs verwalten hinterlegen.')
-      return
-    }
-
-    setIsLoading(true)
-    setError(null)
-    setResults(null)
-
-    try {
-      const response = await fetch('http://72.61.80.21:3000/scrape', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ urls: allUrls }),
-      })
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`)
-      }
-
-      const data = await response.json()
-
-      if (data.success) {
-        // Evaluate History (Diffing)
-        const historyObj = JSON.parse(localStorage.getItem('scrapeHistory') || '{}')
-        const getBaseUrl = (fullUrl) => fullUrl.split('?')[0]
-
-        data.results.forEach(res => {
-          if (!res.success || !res.offers) return;
-          const key = getBaseUrl(res.url)
-          const prev = historyObj[key]
-
-          if (prev) {
-            res.offers.forEach(offer => {
-              offer.diff = {}
-              if (offer.rank === 1 && prev.rank1) {
-                if (offer.price !== prev.rank1.price) offer.diff.oldPrice = prev.rank1.price;
-              }
-              if (offer.isHealthRise && prev.healthRise) {
-                if (offer.price !== prev.healthRise.price) offer.diff.oldPrice = prev.healthRise.price;
-                if (offer.rank !== prev.healthRise.rank) offer.diff.oldRank = prev.healthRise.rank;
-              }
-              if (offer.rank === 2 && prev.rank2) {
-                if (offer.shop === prev.rank2.shop && offer.price !== prev.rank2.price) {
-                  offer.diff.oldPrice = prev.rank2.price;
-                }
-              }
-            })
-          }
-
-          // Save to history
-          const newHist = { date: Date.now() }
-          const r1 = res.offers.find(o => o.rank === 1)
-          if (r1) {
-            newHist.rank1 = { price: r1.price, shop: r1.shop };
-            if (prev && prev.rank1) {
-              newHist.prevRank1Price = prev.rank1.price;
-            }
-          }
-
-          const hr = res.offers.find(o => o.isHealthRise)
-          if (hr) newHist.healthRise = { price: hr.price, rank: hr.rank, shop: hr.shop }
-
-          const r2 = res.offers.find(o => o.rank === 2)
-          if (r2) newHist.rank2 = { price: r2.price, shop: r2.shop }
-
-          historyObj[key] = newHist
-        })
-
-        localStorage.setItem('scrapeHistory', JSON.stringify(historyObj))
-        setResults(data.results)
-      } else {
-        throw new Error(data.error || 'Unknown scraping error occurred')
-      }
-    } catch (err) {
-      setError(err.message || 'Fehler beim Verbinden mit dem Scraper-Backend.')
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
+function ComingSoon({ title }) {
   return (
-    <div className="app-container">
-      <header className="hero">
-        <img src="/health-rise-logo.png" alt="Health Rise Logo" className="brand-logo" />
-        <h1>Idealo Price Tracker</h1>
-        <p>Preise automatisch extrahieren & vergleichen</p>
-      </header>
-
-      <div className="tabs">
-        <button
-          className={`tab-btn ${activeTab === 'scraper' ? 'active' : ''}`}
-          onClick={() => setActiveTab('scraper')}
-        >
-          Scraping Lauf
-        </button>
-        <button
-          className={`tab-btn ${activeTab === 'urls' ? 'active' : ''}`}
-          onClick={() => setActiveTab('urls')}
-        >
-          URLs Verwalten ({savedUrls.length})
-        </button>
-        <button
-          className={`tab-btn ${activeTab === 'evaluation' ? 'active' : ''}`}
-          onClick={() => setActiveTab('evaluation')}
-        >
-          Produktauswertung
-        </button>
-      </div>
-
-      {activeTab === 'scraper' && (
-        <>
-          <ScraperForm
-            savedUrlsCount={savedUrls.length}
-            handleSubmit={handleSubmit}
-            isLoading={isLoading}
-            error={error}
-          />
-          <ResultsDisplay
-            results={results}
-            isLoading={isLoading}
-          />
-        </>
-      )}
-
-      {activeTab === 'urls' && (
-        <UrlManager savedUrls={savedUrls} setSavedUrls={setSavedUrls} />
-      )}
-
-      {activeTab === 'evaluation' && (
-        <ProductEvaluation savedUrls={savedUrls} results={results} />
-      )}
+    <div className="coming-soon">
+      <img src="/health-rise-logo.png" alt="Health Rise" style={{ maxWidth: '200px', marginBottom: '2rem', opacity: 0.5 }} />
+      <h2>{title}</h2>
+      <p>Diese Funktion wird in Kürze verfügbar sein.</p>
     </div>
-  )
+  );
 }
 
-export default App
+function Sidebar() {
+  return (
+    <div className="sidebar">
+      <div className="sidebar-logo">
+        <img src="/health-rise-logo.png" alt="Health Rise Logo" />
+      </div>
+      <nav className="sidebar-nav">
+        <NavLink to="/dashboard" className={({ isActive }) => "nav-item " + (isActive ? "active" : "")}>
+          <LayoutDashboard /> Dashboard (Coming Soon)
+        </NavLink>
+        <NavLink to="/research" className={({ isActive }) => "nav-item " + (isActive ? "active" : "")}>
+          <Search /> Market Research
+        </NavLink>
+        <NavLink to="/preisueberwachung" className={({ isActive }) => "nav-item " + (isActive ? "active" : "")}>
+          <LineChart /> Preisüberwachung
+        </NavLink>
+        <NavLink to="/bewegungsanalyse" className={({ isActive }) => "nav-item " + (isActive ? "active" : "")}>
+          <Activity /> Bewegungsanalyse (Coming Soon)
+        </NavLink>
+      </nav>
+    </div>
+  );
+}
+
+function App() {
+  return (
+    <div className="app-container">
+      <Sidebar />
+      <main className="main-content">
+        <Routes>
+          <Route path="/" element={<Navigate to="/preisueberwachung" replace />} />
+          <Route path="/dashboard" element={<ComingSoon title="Dashboard" />} />
+          <Route path="/research" element={<MarketResearch />} />
+          <Route path="/preisueberwachung" element={<Preisueberwachung />} />
+          <Route path="/bewegungsanalyse" element={<ComingSoon title="Bewegungsanalyse" />} />
+        </Routes>
+      </main>
+    </div>
+  );
+}
+
+export default App;

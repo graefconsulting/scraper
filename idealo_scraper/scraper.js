@@ -2,28 +2,71 @@ const express = require('express');
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 const cors = require('cors');
+const db = require('./database');
+const { importCSV } = require('./csvImporter');
+const { runResearch } = require('./research');
 
-// Enable stealth plugin
 puppeteer.use(StealthPlugin());
-
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-app.post('/scrape', async (req, res) => {
-    let { targetUrl, urls } = req.body;
-    console.log("INCOMING REQUEST BODY:", req.body);
+// Load CSV on startup
+importCSV();
 
-    // Normalize input to an array of URLs
-    if (targetUrl && !urls) {
-        urls = [targetUrl];
-    }
+// ------------------------------------------------------------------
+// API ENDPOINTS
+// ------------------------------------------------------------------
 
-    if (!urls || !Array.isArray(urls) || urls.length === 0) {
-        return res.status(400).json({ error: "Missing 'urls' array in request body.", receivedBody: req.body });
-    }
+// Get all products + latest scrape data for the frontend
+app.get('/api/products', (req, res) => {
+    // We want the product data, and we want to join the LAST TWO scrapes to determine trend arrows.
+    // To do this efficiently, we can fetch all products, and then fetch the latest 2 scrapes per product.
 
-    console.log(`Received request to scrape ${urls.length} URLs`);
+    db.all("SELECT * FROM products", [], (err, products) => {
+        if (err) {
+            return res.status(500).json({ error: err.message });
+        }
+
+        db.all("SELECT * FROM scrapes ORDER BY product_id, timestamp DESC", [], (err, scrapes) => {
+            if (err) {
+                return res.status(500).json({ error: err.message });
+            }
+
+            // Group scrapes by product
+            const scrapesByProduct = {};
+            scrapes.forEach(s => {
+                if (!scrapesByProduct[s.product_id]) scrapesByProduct[s.product_id] = [];
+                scrapesByProduct[s.product_id].push(s);
+            });
+
+            // Attach to products
+            const productsWithHistory = products.map(p => {
+                const pScrapes = scrapesByProduct[p.id] || [];
+                // pScrapes[0] is the latest, pScrapes[1] is the previous
+                const currentScrape = pScrapes[0] || null;
+                const prevScrape = pScrapes[1] || null;
+
+                return {
+                    ...p,
+                    currentScrape,
+                    prevScrape
+                };
+            });
+
+            res.json({ success: true, data: productsWithHistory });
+        });
+    });
+});
+
+// Manual trigger for CSV import
+app.post('/api/sync-csv', (req, res) => {
+    importCSV();
+    res.json({ success: true, message: "CSV import triggered" });
+});
+
+// Helper Function: The Scrape Logic
+async function scrapeUrlForProduct(url, pId) {
     let browser;
     try {
         browser = await puppeteer.launch({
@@ -34,155 +77,159 @@ app.post('/scrape', async (req, res) => {
         const page = await browser.newPage();
         await page.setViewport({ width: 1920, height: 1080 });
 
-        const allResults = [];
+        console.log(`Navigating to Idealo: ${url}`);
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
-        for (const url of urls) {
-            console.log(`Navigating to Idealo: ${url}`);
-            try {
-                await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+        try {
+            await page.waitForSelector('a.productOffers-listItemOfferPrice', { timeout: 15000 });
+        } catch (e) {
+            console.log("Timeout waiting for offers... continuing anyway.");
+        }
 
-                console.log('Waiting for offers to load...');
-                try {
-                    // We ensure the list item that holds the price is visible
-                    await page.waitForSelector('a.productOffers-listItemOfferPrice', { timeout: 15000 });
-                } catch (e) {
-                    console.log("Timeout waiting for offers... continuing anyway.");
+        const results = await page.evaluate(() => {
+            const offerNodes = document.querySelectorAll('li.productOffers-listItem');
+            const data = [];
+            let healthRiseOffer = null;
+            let lowestPriceVal = null;
+
+            const maxToExtract = Math.min(20, offerNodes.length);
+
+            for (let i = 0; i < maxToExtract; i++) {
+                const node = offerNodes[i];
+                let price = null;
+                let shop = "Unbekannt";
+                let link = "";
+
+                // Link extraction
+                const linkNode = node.querySelector('a[href]');
+                if (linkNode) link = linkNode.href;
+
+                // Shop extraction
+                const shopLink = node.querySelector('a[data-shop-name]');
+                if (shopLink) {
+                    shop = shopLink.getAttribute('data-shop-name');
+                } else {
+                    const shopImg = node.querySelector('img.productOffers-listItemOfferShopV2LogoImage');
+                    if (shopImg && shopImg.alt && !shopImg.alt.includes('idealo')) {
+                        shop = shopImg.alt;
+                    } else {
+                        const dMtrx = node.getAttribute('data-mtrx-click');
+                        if (dMtrx) {
+                            try { const parsed = JSON.parse(dMtrx); if (parsed.shop_name) shop = parsed.shop_name; } catch (e) { }
+                        }
+                    }
+                }
+                if (shop.includes(' - ')) shop = shop.split(' - ')[0];
+
+                // Price extraction
+                const priceLink = node.querySelector('a.productOffers-listItemOfferPrice');
+                if (priceLink) {
+                    let priceText = "";
+                    for (let child of priceLink.childNodes) {
+                        if (child.nodeType === 3) priceText += child.textContent; // TEXT_NODE
+                    }
+                    if (priceText.trim() === "") priceText = priceLink.innerText;
+
+                    // German comma to float format
+                    let rawPriceStr = priceText.match(/[\d.,]+/);
+                    if (rawPriceStr) {
+                        let cleanPriceStr = rawPriceStr[0].trim().replace(/\./g, '').replace(',', '.');
+                        price = parseFloat(cleanPriceStr);
+                    }
                 }
 
-                console.log('Page loaded, evaluating for prices...');
+                if (i === 0 && price !== null) lowestPriceVal = price;
 
-                const results = await page.evaluate(() => {
-                    const offerNodes = document.querySelectorAll('li.productOffers-listItem');
-                    const data = [];
+                // Always push top 2
+                if (i < 2) {
+                    data.push({ rank: i + 1, price, shop, link });
+                }
 
-                    const maxToExtract = Math.min(20, offerNodes.length); // Scan up to 20 to find Health Rise
-                    let healthRiseOffer = null;
-
-                    for (let i = 0; i < maxToExtract; i++) {
-                        const node = offerNodes[i];
-                        let price = null;
-                        let shop = "Unbekannt";
-
-                        // Shop extraction
-                        // Strategy 1: data-shop-name attribute on the logo link
-                        const shopLink = node.querySelector('a[data-shop-name]');
-                        if (shopLink) {
-                            shop = shopLink.getAttribute('data-shop-name');
-                        } else {
-                            // Strategy 2: Image alt text
-                            const shopImg = node.querySelector('img.productOffers-listItemOfferShopV2LogoImage');
-                            if (shopImg && shopImg.alt && !shopImg.alt.includes('idealo')) {
-                                shop = shopImg.alt;
-                            } else {
-                                // Strategy 3: Parse from data-mtrx-click if present
-                                const dMtrx = node.getAttribute('data-mtrx-click');
-                                if (dMtrx) {
-                                    try {
-                                        const parsed = JSON.parse(dMtrx);
-                                        if (parsed.shop_name) shop = parsed.shop_name;
-                                    } catch (e) { }
-                                }
-                            }
-                        }
-
-                        // Clean shop name (e.g. "docmorris.de - Shop aus Heerlen" -> "docmorris.de")
-                        if (shop.includes(' - ')) {
-                            shop = shop.split(' - ')[0];
-                        }
-
-                        // Price extraction
-                        const priceLink = node.querySelector('a.productOffers-listItemOfferPrice');
-                        if (priceLink) {
-                            // Try to extract the direct text node that holds the price, excluding the span with the base price
-                            let priceText = "";
-                            for (let child of priceLink.childNodes) {
-                                if (child.nodeType === 3) { // TEXT_NODE
-                                    priceText += child.textContent;
-                                }
-                            }
-                            if (priceText.trim() === "") priceText = priceLink.innerText;
-
-                            const match = priceText.match(/[\d.,]+/);
-                            if (match) {
-                                price = match[0].trim();
-                            }
-                        }
-
-                        // Always push top 2
-                        if (i < 2) {
-                            data.push({
-                                rank: i + 1,
-                                price: price,
-                                shop: shop
-                            });
-                        }
-
-                        // Check for Health Rise
-                        if (shop.toLowerCase().includes('health rise') || shop.toLowerCase().includes('health-rise')) {
-                            healthRiseOffer = {
-                                rank: i + 1,
-                                price: price,
-                                shop: shop,
-                                isHealthRise: true
-                            };
-                        }
-                    }
-
-                    // Append Health Rise if found and not already in top 2
-                    if (healthRiseOffer && healthRiseOffer.rank > 2) {
-                        data.push(healthRiseOffer);
-                    }
-
-                    return data;
-                });
-
-                console.log(`Scraping successful for ${url}:`, results);
-
-                // Fetch the product title to display nicely in the frontend
-                const title = await page.evaluate(() => {
-                    const h1 = document.querySelector('h1');
-                    return h1 ? h1.innerText.trim() : 'Unknown Product';
-                });
-
-                allResults.push({
-                    url: url,
-                    title: title,
-                    offers: results,
-                    success: true
-                });
-
-            } catch (err) {
-                console.error(`Failed to scrape ${url}:`, err.message);
-                allResults.push({
-                    url: url,
-                    success: false,
-                    error: err.message
-                });
+                // Check for Health Rise
+                if (shop.toLowerCase().includes('health rise') || shop.toLowerCase().includes('health-rise')) {
+                    healthRiseOffer = { rank: i + 1, price, shop, link };
+                }
             }
 
-            // Wait slightly between requests
-            await new Promise(resolve => setTimeout(resolve, 2000));
-        }
-
-        res.json({
-            success: true,
-            results: allResults
+            return { top2: data, healthRise: healthRiseOffer, lowestPrice: lowestPriceVal };
         });
 
-    } catch (error) {
-        console.error("Scraping error:", error);
-        res.status(500).json({
-            success: false,
-            error: error.message
-        });
+        console.log(`Scraping successful for ${url}`, results);
+
+        // Map to DB Schema
+        const rank1 = results.top2[0] || {};
+        const rank2 = results.top2[1] || {};
+        const hr = results.healthRise || {};
+
+        db.run(`
+            INSERT INTO scrapes (product_id, rank1_shop, rank1_price, rank1_link, rank2_shop, rank2_price, rank2_link, hr_rank, hr_price, hr_link, lowest_price) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `, [
+            pId,
+            rank1.shop || null, rank1.price || null, rank1.link || null,
+            rank2.shop || null, rank2.price || null, rank2.link || null,
+            hr.rank || null, hr.price || null, hr.link || null,
+            results.lowestPrice || null
+        ]);
+
+        return { success: true };
+    } catch (err) {
+        console.error(`Failed to scrape ${url}:`, err.message);
+        return { success: false, error: err.message };
     } finally {
-        if (browser) {
-            await browser.close();
-        }
+        if (browser) await browser.close();
     }
+}
+
+// Background scraping worker route
+app.post('/api/scrape/start', (req, res) => {
+    console.log("Triggered background scraping run...");
+    res.json({ success: true, message: "Background scraping loop started." });
+
+    // Background process
+    db.all("SELECT id, idealo_link FROM products WHERE idealo_link IS NOT NULL AND idealo_link != ''", [], async (err, products) => {
+        if (err) {
+            console.error("Error fetching products for scrape", err.message);
+            return;
+        }
+
+        for (const p of products) {
+            await scrapeUrlForProduct(p.idealo_link, p.id);
+            // Wait between requests to avoid ban
+            await new Promise(resolve => setTimeout(resolve, 5000));
+        }
+        console.log("Finished background scraping loop for all products.");
+    });
+});
+
+// Get latest Market Research Results
+app.get('/api/market-research', (req, res) => {
+    // We want the most recent row per category
+    db.all(`
+        SELECT category, result, timestamp 
+        FROM market_research 
+        WHERE id IN (
+            SELECT MAX(id) FROM market_research GROUP BY category
+        )
+    `, [], (err, rows) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json({ success: true, data: rows });
+    });
+});
+
+// Trigger Market Research Run
+app.post('/api/market-research/run', (req, res) => {
+    console.log("Triggered market research run...");
+    runResearch().then(() => {
+        console.log("Market research finished and saved.");
+    }).catch(e => {
+        console.error("Market research failed:", e);
+    });
+    // Respond immediately because it takes a long time
+    res.json({ success: true, message: "Market research started in background." });
 });
 
 const PORT = 3000;
 app.listen(PORT, () => {
-    console.log(`Stealth Scraper Service running on port ${PORT}`);
+    console.log(`Backend API & Scraper running on port ${PORT}`);
 });
