@@ -15,7 +15,7 @@ export default function MarketResearch() {
     const fetchResearch = async () => {
         setLoading(true);
         try {
-            const res = await axios.get('http://72.61.80.21:3000/api/market-research');
+            const res = await axios.get('/api/market-research');
             if (res.data.success) {
                 // Sort to ensure specific order if needed, but backend already orders by created_at DESC
                 setResearchData(res.data.data);
@@ -37,7 +37,7 @@ export default function MarketResearch() {
         setIsRunning(true);
         setError(null);
         try {
-            const res = await axios.post('http://72.61.80.21:3000/api/market-research/run');
+            const res = await axios.post('/api/market-research/run');
             if (res.data.success) {
                 await fetchResearch();
             } else {

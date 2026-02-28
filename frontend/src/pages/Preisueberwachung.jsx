@@ -20,7 +20,7 @@ export default function Preisueberwachung() {
 
     const fetchProducts = async () => {
         try {
-            const res = await axios.get('http://72.61.80.21:3000/api/products');
+            const res = await axios.get('/api/products');
             if (res.data.success) {
                 setProducts(res.data.data);
             } else {
