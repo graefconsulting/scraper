@@ -9,7 +9,7 @@ services:
       - "3000:3000"
     restart: always
     volumes:
-      - ./idealo_scraper/data.db:/app/data.db
+      - ./idealo_data:/app/data
       - ./produkte.csv:/app/produkte.csv
 
   frontend:
@@ -19,3 +19,5 @@ services:
     ports:
       - "8080:80"
     restart: always
+    depends_on:
+      - backend
