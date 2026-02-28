@@ -1,0 +1,9 @@
+node_modules/
+.env
+data.db
+idealo_olata/
+data/
+vps_logs.txt
+frontend_logs.txt
+backend_logs.txt
+ps_logs.txt
