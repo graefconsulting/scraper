@@ -6,6 +6,7 @@ export default function Preisueberwachung() {
     const [products, setProducts] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
+    const [isScraping, setIsScraping] = useState(false);
 
     // Filtering & Sorting State
     const [search, setSearch] = useState('');
@@ -30,6 +31,22 @@ export default function Preisueberwachung() {
             setError(err.message);
         } finally {
             setLoading(false);
+        }
+    };
+
+    const startScraping = async () => {
+        setIsScraping(true);
+        try {
+            const res = await axios.post('/api/scrape/start');
+            if (res.data.success) {
+                alert('Scraping-Vorgang wurde im Hintergrund gestartet! (Dies wird sehr lange dauern. Lade die Seite später neu, um Ergebnisse zu sehen.)');
+            } else {
+                alert('Fehler: ' + (res.data.error || 'Unbekannt.'));
+            }
+        } catch (error) {
+            alert('Netzwerkfehler beim Starten des Scrapings.');
+        } finally {
+            setIsScraping(false);
         }
     };
 
@@ -155,7 +172,29 @@ export default function Preisueberwachung() {
     return (
         <div className="page-container" style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
             <div className="header-row" style={{ alignItems: 'flex-start', flexDirection: 'column', gap: '1rem' }}>
-                <h2>Preisüberwachung</h2>
+                <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
+                    <h2>Preisüberwachung</h2>
+                    <button
+                        onClick={startScraping}
+                        disabled={isScraping}
+                        style={{
+                            background: 'var(--success-color)',
+                            color: 'white',
+                            border: 'none',
+                            padding: '0.6rem 1.2rem',
+                            borderRadius: '0.5rem',
+                            cursor: isScraping ? 'wait' : 'pointer',
+                            opacity: isScraping ? 0.7 : 1,
+                            fontWeight: 600,
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.5rem'
+                        }}
+                    >
+                        {isScraping ? <span className="animate-spin" style={{ display: 'inline-block' }}>↻</span> : '⟳'}
+                        {isScraping ? 'Starte...' : 'Neuen Scrape starten'}
+                    </button>
+                </div>
                 <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'center', background: 'white', padding: '1rem', borderRadius: '0.5rem', border: '1px solid var(--border-color)', width: '100%' }}>
                     {/* Search */}
                     <div style={{ position: 'relative' }}>

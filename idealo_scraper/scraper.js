@@ -218,15 +218,16 @@ app.get('/api/market-research', (req, res) => {
 });
 
 // Trigger Market Research Run
-app.post('/api/market-research/run', (req, res) => {
+app.post('/api/market-research/run', async (req, res) => {
     console.log("Triggered market research run...");
-    runResearch().then(() => {
+    try {
+        await runResearch();
         console.log("Market research finished and saved.");
-    }).catch(e => {
+        res.json({ success: true, message: "Market research finished." });
+    } catch (e) {
         console.error("Market research failed:", e);
-    });
-    // Respond immediately because it takes a long time
-    res.json({ success: true, message: "Market research started in background." });
+        res.status(500).json({ success: false, error: e.message });
+    }
 });
 
 const PORT = 3000;
