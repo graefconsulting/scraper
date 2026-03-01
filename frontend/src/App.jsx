@@ -23,7 +23,7 @@ function Sidebar() {
       </div>
       <nav className="sidebar-nav">
         <NavLink to="/dashboard" className={({ isActive }) => "nav-item " + (isActive ? "active" : "")}>
-          <LayoutDashboard /> Dashboard (Coming Soon)
+          <LayoutDashboard /> Dashboard
         </NavLink>
         <NavLink to="/research" className={({ isActive }) => "nav-item " + (isActive ? "active" : "")}>
           <Search /> Market Research
