@@ -23,7 +23,7 @@ export default function Dashboard() {
     useEffect(() => {
         const fetchDashboard = async () => {
             try {
-                const res = await axios.get('/test-dashboard.json');
+                const res = await axios.get('/api/dashboard');
                 if (res.data.success) {
                     setData(res.data);
                 } else {
