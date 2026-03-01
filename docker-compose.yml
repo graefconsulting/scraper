@@ -8,6 +8,8 @@ services:
     ports:
       - "3000:3000"
     restart: always
+    env_file:
+      - .env
     volumes:
       - ./idealo_data:/app/data
       - ./produkte.csv:/app/produkte.csv
