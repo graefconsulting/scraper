@@ -189,24 +189,32 @@ async function scrapeUrlForProduct(url, pId) {
 }
 
 // Background scraping worker route
-app.post('/api/scrape/start', (req, res) => {
+app.post('/api/scrape/start', async (req, res) => {
     console.log("Triggered background scraping run...");
-    res.json({ success: true, message: "Background scraping loop started." });
 
-    // Background process
-    db.all("SELECT id, idealo_link FROM products WHERE idealo_link IS NOT NULL AND idealo_link != ''", [], async (err, products) => {
-        if (err) {
-            console.error("Error fetching products for scrape", err.message);
-            return;
-        }
+    try {
+        await new Promise((resolve, reject) => {
+            db.all("SELECT id, idealo_link FROM products WHERE idealo_link IS NOT NULL AND idealo_link != ''", [], async (err, products) => {
+                if (err) {
+                    console.error("Error fetching products for scrape", err.message);
+                    return reject(err);
+                }
 
-        for (const p of products) {
-            await scrapeUrlForProduct(p.idealo_link, p.id);
-            // Wait between requests to avoid ban
-            await new Promise(resolve => setTimeout(resolve, 5000));
-        }
-        console.log("Finished background scraping loop for all products.");
-    });
+                for (const p of products) {
+                    await scrapeUrlForProduct(p.idealo_link, p.id);
+                    // Wait between requests to avoid ban
+                    await new Promise(r => setTimeout(r, 5000));
+                }
+                console.log("Finished scraping loop for all products.");
+                resolve();
+            });
+        });
+
+        res.json({ success: true, message: "Scraping completed successfully." });
+    } catch (e) {
+        console.error("Scraping loop failed:", e);
+        res.status(500).json({ success: false, error: e.message });
+    }
 });
 
 // Get latest Market Research Results
