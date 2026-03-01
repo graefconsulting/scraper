@@ -18,11 +18,12 @@ export default function Dashboard() {
     const [data, setData] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
+    const [activeTab, setActiveTab] = useState('Uebersicht');
 
     useEffect(() => {
         const fetchDashboard = async () => {
             try {
-                const res = await axios.get('/api/dashboard');
+                const res = await axios.get('/test-dashboard.json');
                 if (res.data.success) {
                     setData(res.data);
                 } else {
@@ -192,8 +193,6 @@ export default function Dashboard() {
     if (latest_research?.created_at) {
         mrDateStr = new Date(latest_research.created_at).toLocaleDateString('de-DE');
     }
-
-    const [activeTab, setActiveTab] = useState('Uebersicht');
 
     return (
         <div className="page-container" style={{ display: 'flex', flexDirection: 'column', gap: '1rem', height: 'calc(100vh - 40px)', overflow: 'hidden', padding: '1rem 2rem' }}>
