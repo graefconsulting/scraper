@@ -68,11 +68,33 @@ function createTables() {
         db.run(`
             CREATE TABLE IF NOT EXISTS market_research (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                run_id INTEGER,
                 category TEXT, /* 'trends', 'natugena', 'vitaworld', 'dr_niedermaier', 'shop_naturpur', 'vitaminversand24' */
-                result TEXT
+                result TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         `);
+
+        // Migration: Add run_id and created_at if missing from older schemas
+        db.all("PRAGMA table_info(market_research);", (err, rows) => {
+            if (!err && rows) {
+                const hasRunId = rows.some(r => r.name === 'run_id');
+                if (!hasRunId) {
+                    db.serialize(() => {
+                        db.run("ALTER TABLE market_research ADD COLUMN run_id INTEGER;", (err) => {
+                            if (err) console.error("Migration failed:", err.message);
+                            else console.log("Migration: Added run_id to market_research table.");
+                        });
+                        db.run("ALTER TABLE market_research ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP;", (err) => {
+                            if (err) console.error("Migration failed:", err.message);
+                            else console.log("Migration: Added created_at to market_research table.");
+                        });
+                        // Backfill run_id based on id (6 rows per run typically)
+                        db.run("UPDATE market_research SET run_id = ((id - 1) / 6) + 1, created_at = timestamp;");
+                    });
+                }
+            }
+        });
 
         // Migration: Add competitor_count if missing from older schemas
         db.all("PRAGMA table_info(scrapes);", (err, rows) => {

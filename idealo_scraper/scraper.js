@@ -218,15 +218,47 @@ app.post('/api/scrape/start', async (req, res) => {
     }
 });
 
-// Get latest Market Research Results
-app.get('/api/market-research', (req, res) => {
-    // We want the most recent row per category
+// Get all Market Research Versions
+app.get('/api/research/versions', (req, res) => {
     db.all(`
-        SELECT category, result, timestamp 
+        SELECT run_id, MAX(created_at) as created_at
         FROM market_research 
-        WHERE id IN (
-            SELECT MAX(id) FROM market_research GROUP BY category
-        )
+        WHERE run_id IS NOT NULL 
+        GROUP BY run_id 
+        ORDER BY run_id ASC
+    `, [], (err, rows) => {
+        if (err) return res.status(500).json({ error: err.message });
+
+        // Map to add version_number
+        const versions = rows.map((r, index) => ({
+            run_id: r.run_id,
+            created_at: r.created_at,
+            version_number: index + 1
+        }));
+        res.json({ success: true, data: versions });
+    });
+});
+
+// Get specific Market Research Version
+app.get('/api/research/version/:run_id', (req, res) => {
+    const runId = req.params.run_id;
+    db.all(`
+        SELECT category, result, created_at as timestamp 
+        FROM market_research 
+        WHERE run_id = ?
+    `, [runId], (err, rows) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json({ success: true, data: rows });
+    });
+});
+
+// Get latest Market Research Results (Backward compatibility)
+app.get('/api/market-research', (req, res) => {
+    // We want the rows belonging to the most recent run_id
+    db.all(`
+        SELECT category, result, created_at as timestamp 
+        FROM market_research 
+        WHERE run_id = (SELECT MAX(run_id) FROM market_research)
     `, [], (err, rows) => {
         if (err) return res.status(500).json({ error: err.message });
         res.json({ success: true, data: rows });
