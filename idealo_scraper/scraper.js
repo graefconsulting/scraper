@@ -158,7 +158,7 @@ async function scrapeUrlForProduct(url, pId) {
                 }
             }
 
-            return { top2: data, healthRise: healthRiseOffer, lowestPrice: lowestPriceVal };
+            return { top2: data, healthRise: healthRiseOffer, lowestPrice: lowestPriceVal, competitorCount: offerNodes.length };
         });
 
         console.log(`Scraping successful for ${url}`, results);
@@ -169,13 +169,14 @@ async function scrapeUrlForProduct(url, pId) {
         const hr = results.healthRise || {};
 
         db.run(`
-            INSERT INTO scrapes (product_id, rank1_shop, rank1_price, rank1_link, rank2_shop, rank2_price, rank2_link, hr_rank, hr_price, hr_link, lowest_price) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO scrapes (product_id, rank1_shop, rank1_price, rank1_link, rank2_shop, rank2_price, rank2_link, hr_rank, hr_price, hr_link, competitor_count, lowest_price) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
             pId,
             rank1.shop || null, rank1.price || null, rank1.link || null,
             rank2.shop || null, rank2.price || null, rank2.link || null,
             hr.rank || null, hr.price || null, hr.link || null,
+            results.competitorCount || null,
             results.lowestPrice || null
         ]);
 

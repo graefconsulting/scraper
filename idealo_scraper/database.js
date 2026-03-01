@@ -57,6 +57,7 @@ function createTables() {
                 hr_price REAL,
                 hr_link TEXT,
                 
+                competitor_count INTEGER,
                 lowest_price REAL,
                 
                 FOREIGN KEY (product_id) REFERENCES products (id)
@@ -72,6 +73,19 @@ function createTables() {
                 result TEXT
             )
         `);
+
+        // Migration: Add competitor_count if missing from older schemas
+        db.all("PRAGMA table_info(scrapes);", (err, rows) => {
+            if (!err && rows) {
+                const hasCompetitorCount = rows.some(r => r.name === 'competitor_count');
+                if (!hasCompetitorCount) {
+                    db.run("ALTER TABLE scrapes ADD COLUMN competitor_count INTEGER;", (err) => {
+                        if (err) console.error("Migration failed:", err.message);
+                        else console.log("Migration: Added competitor_count to scrapes table.");
+                    });
+                }
+            }
+        });
 
         console.log("Database tables initialized.");
     });
