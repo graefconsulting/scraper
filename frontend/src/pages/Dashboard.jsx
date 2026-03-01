@@ -51,17 +51,21 @@ export default function Dashboard() {
         lastScrapeStr = `${d.toLocaleDateString('de-DE')} ${d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} Uhr`;
     }
 
-    const { kpis, ampel_verteilung, top10_rohertrag, alle_produkte, latest_research } = data;
+    const kpis = data.kpis || {};
+    const ampel_verteilung = data.ampel_verteilung || {};
+    const top10_rohertrag = data.top10_rohertrag || [];
+    const alle_produkte = data.alle_produkte || [];
+    const latest_research = data.latest_research || { sections: {} };
 
     let marginColor = 'var(--danger-color)';
-    if (kpis.avg_handelsspanne >= 20) marginColor = 'var(--success-color)';
-    else if (kpis.avg_handelsspanne >= 10) marginColor = 'var(--warning-color)';
+    if ((kpis.avg_handelsspanne || 0) >= 20) marginColor = 'var(--success-color)';
+    else if ((kpis.avg_handelsspanne || 0) >= 10) marginColor = 'var(--warning-color)';
 
     // --- Chart 1: Donut (Ampel) ---
     const donutData = {
         labels: ['Grün', 'Gelb', 'Rot', 'Grau'],
         datasets: [{
-            data: [ampel_verteilung.gruen, ampel_verteilung.gelb, ampel_verteilung.rot, ampel_verteilung.grau],
+            data: [ampel_verteilung.gruen || 0, ampel_verteilung.gelb || 0, ampel_verteilung.rot || 0, ampel_verteilung.grau || 0],
             backgroundColor: ['#22c55e', '#f59e0b', '#ef4444', '#9ca3af'],
             borderWidth: 0
         }]
@@ -69,7 +73,7 @@ export default function Dashboard() {
 
     // --- Chart 2: Top 10 Rohertrag (Horizontal Bar) ---
     const top10Data = {
-        labels: top10_rohertrag.map(p => p.name.length > 30 ? p.name.substring(0, 30) + '...' : p.name),
+        labels: top10_rohertrag.map(p => p.name?.length > 30 ? p.name.substring(0, 30) + '...' : (p.name || '')),
         datasets: [{
             label: 'Rohertrag',
             data: top10_rohertrag.map(p => p.rohertrag),
@@ -185,7 +189,7 @@ export default function Dashboard() {
     ];
 
     let mrDateStr = "";
-    if (latest_research.created_at) {
+    if (latest_research?.created_at) {
         mrDateStr = new Date(latest_research.created_at).toLocaleDateString('de-DE');
     }
 
@@ -306,7 +310,7 @@ export default function Dashboard() {
                                                     <div style={{ width: '10px', height: '10px', borderRadius: '50%', background: p.ampel === 'rot' ? '#ef4444' : '#f59e0b', margin: '0 auto' }}></div>
                                                 </td>
                                                 <td style={{ padding: '0.5rem' }}>
-                                                    <div style={{ fontWeight: 500 }}>{p.name.length > 40 ? p.name.substring(0, 40) + '...' : p.name}</div>
+                                                    <div style={{ fontWeight: 500 }}>{p.name?.length > 40 ? p.name.substring(0, 40) + '...' : (p.name || '')}</div>
                                                     <div style={{ color: 'var(--text-muted)', fontSize: '0.65rem' }}>{p.sku}</div>
                                                 </td>
                                                 <td style={{ padding: '0.5rem' }}>
@@ -368,7 +372,7 @@ export default function Dashboard() {
                         ) : (
                             <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', overflowY: 'auto', alignContent: 'flex-start' }}>
                                 {sections.map(sec => {
-                                    const d = latest_research.sections[sec.key];
+                                    const d = latest_research?.sections?.[sec.key];
                                     if (!d || !d.zusammenfassung) return null;
 
                                     const bullets = d.trending_kategorien || d.neue_produkte || d.aktuelle_aktionen || [];
@@ -381,7 +385,7 @@ export default function Dashboard() {
                                             {bullets.length > 0 && (
                                                 <ul style={{ paddingLeft: '1.2rem', margin: 0, fontSize: '0.8rem', color: 'var(--text-muted)' }}>
                                                     {bullets.slice(0, 3).map((b, i) => (
-                                                        <li key={i}>{typeof b === 'string' ? (b.length > 40 ? b.substring(0, 40) + '...' : b) : (b.name ? b.name : Object.values(b)[0])}</li>
+                                                        <li key={i}>{typeof b === 'string' ? (b.length > 40 ? b.substring(0, 40) + '...' : b) : (b?.name ? b.name : (b ? Object.values(b)[0] : ''))}</li>
                                                     ))}
                                                 </ul>
                                             )}
