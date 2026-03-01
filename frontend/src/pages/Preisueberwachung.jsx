@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { Search, ChevronUp, ChevronDown, Minus, ExternalLink, Calculator } from 'lucide-react';
 import axios from 'axios';
 
@@ -17,9 +18,9 @@ const getRankTrendIcon = (curr, prev) => {
     return <Minus color="gray" size={16} />;
 };
 
-function ProductCard({ p }) {
+function ProductCard({ p, defaultCalcOpen }) {
     const is19 = p.tax_rate === 19;
-    const [isCalcOpen, setIsCalcOpen] = useState(false);
+    const [isCalcOpen, setIsCalcOpen] = useState(defaultCalcOpen || false);
     const [calcBruttoVK, setCalcBruttoVK] = useState(p.price_gross || 0);
 
     const adjustCalc = (amount) => {
@@ -215,13 +216,14 @@ function ProductCard({ p }) {
 }
 
 export default function Preisueberwachung() {
+    const location = useLocation();
     const [products, setProducts] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [isScraping, setIsScraping] = useState(false);
 
     // Filtering & Sorting State
-    const [search, setSearch] = useState('');
+    const [search, setSearch] = useState(location.state?.prefilterSku || '');
     const [sortField, setSortField] = useState('revenue_net');
     const [sortDesc, setSortDesc] = useState(true);
     const [minHandelsspanne, setMinHandelsspanne] = useState('');
@@ -516,7 +518,11 @@ export default function Preisueberwachung() {
             ) : (
                 <div className="cards-grid" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
                     {processedData.map(p => (
-                        <ProductCard key={p.id} p={p} />
+                        <ProductCard
+                            key={p.id}
+                            p={p}
+                            defaultCalcOpen={location.state?.openCalc && location.state?.prefilterSku === p.id}
+                        />
                     ))}
                 </div>
             )}

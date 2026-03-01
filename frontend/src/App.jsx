@@ -38,6 +38,8 @@ function Sidebar() {
   );
 }
 
+import Dashboard from './pages/Dashboard';
+
 function App() {
   return (
     <div className="app-container">
@@ -45,7 +47,7 @@ function App() {
       <main className="main-content">
         <Routes>
           <Route path="/" element={<Navigate to="/preisueberwachung" replace />} />
-          <Route path="/dashboard" element={<ComingSoon title="Dashboard" />} />
+          <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/research" element={<MarketResearch />} />
           <Route path="/preisueberwachung" element={<Preisueberwachung />} />
           <Route path="/bewegungsanalyse" element={<ComingSoon title="Bewegungsanalyse" />} />
