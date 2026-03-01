@@ -266,16 +266,19 @@ app.get('/api/market-research', (req, res) => {
 });
 
 // Trigger Market Research Run
-app.post('/api/market-research/run', async (req, res) => {
+app.post('/api/market-research/run', (req, res) => {
     console.log("Triggered market research run...");
-    try {
-        await runResearch();
-        console.log("Market research finished and saved.");
-        res.json({ success: true, message: "Market research finished." });
-    } catch (e) {
-        console.error("Market research failed:", e);
-        res.status(500).json({ success: false, error: e.message });
-    }
+
+    // Background execution safely detached from HTTP Request
+    runResearch()
+        .then(() => {
+            console.log("Market research finished and saved.");
+        })
+        .catch(e => {
+            console.error("Market research background execution failed:", e);
+        });
+
+    res.json({ success: true, message: "Market research started in background." });
 });
 
 const PORT = 3000;

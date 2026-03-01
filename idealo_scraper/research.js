@@ -161,8 +161,15 @@ async function callClaudeSonnet(content, category, API_KEY) {
 }
 
 async function runResearch() {
-    const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
-    const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || OPENROUTER_API_KEY; // "Use the same API key used elsewhere in the project" implies using OPENROUTER_API_KEY if ANTHROPIC_API_KEY is not defined explicitly
+    let OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
+    if (OPENROUTER_API_KEY && OPENROUTER_API_KEY.startsWith('=')) {
+        OPENROUTER_API_KEY = OPENROUTER_API_KEY.substring(1);
+    }
+
+    let ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || OPENROUTER_API_KEY;
+    if (ANTHROPIC_API_KEY && ANTHROPIC_API_KEY.startsWith('=')) {
+        ANTHROPIC_API_KEY = ANTHROPIC_API_KEY.substring(1);
+    }
 
     if (!OPENROUTER_API_KEY) {
         throw new Error("OPENROUTER_API_KEY is not defined in the environment.");

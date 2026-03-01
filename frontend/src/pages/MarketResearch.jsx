@@ -64,7 +64,38 @@ export default function MarketResearch() {
         try {
             const res = await axios.post('/api/market-research/run');
             if (res.data.success) {
-                await initData(); // Refetch versions and switch to newest
+                const previousMaxRunId = versions.length > 0 ? versions[versions.length - 1].run_id : 0;
+
+                let done = false;
+                let iterations = 0;
+                // Poll every 5 seconds for a maximum of 45 iterations (225 seconds)
+                while (!done && iterations < 45) {
+                    iterations++;
+                    await new Promise(r => setTimeout(r, 5000));
+                    try {
+                        const versRes = await axios.get('/api/research/versions');
+                        if (versRes.data.success) {
+                            const newVersions = versRes.data.data;
+                            if (newVersions.length > 0) {
+                                const newMax = newVersions[newVersions.length - 1].run_id;
+                                if (newMax > previousMaxRunId) {
+                                    // Check if the backend finished saving all 6 category rows
+                                    const detailRes = await axios.get(`/api/research/version/${newMax}`);
+                                    if (detailRes.data.success && detailRes.data.data.length >= 6) {
+                                        done = true;
+                                        await initData(); // Refetch versions and switch to newest
+                                    }
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        // Ignore sporadic network errors during polling loop
+                    }
+                }
+
+                if (!done) {
+                    setError("Zeitüberschreitung. Der Vorgang dauert ungewöhnlich lange, läuft aber womöglich im Hintergrund noch weiter. Bitte lade die Seite später neu.");
+                }
             } else {
                 setError(res.data.error || 'Fehler beim Starten der Marktforschung');
             }
