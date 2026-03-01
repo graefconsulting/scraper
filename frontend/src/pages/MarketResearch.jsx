@@ -35,7 +35,7 @@ export default function MarketResearch() {
                 setError(res.data.error || 'Fehler beim Laden der Versionen');
             }
         } catch (err) {
-            setError(err.message);
+            setError(err.response?.data?.error || err.message);
         } finally {
             setLoading(false);
         }
@@ -50,7 +50,7 @@ export default function MarketResearch() {
                 setError(res.data.error || 'Fehler beim Laden der Marktforschung');
             }
         } catch (err) {
-            setError(err.message);
+            setError(err.response?.data?.error || err.message);
         }
     };
 
@@ -100,7 +100,7 @@ export default function MarketResearch() {
                 setError(res.data.error || 'Fehler beim Starten der Marktforschung');
             }
         } catch (err) {
-            setError(err.message);
+            setError(err.response?.data?.error || err.message);
         } finally {
             setIsRunning(false);
         }

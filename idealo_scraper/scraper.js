@@ -227,14 +227,26 @@ app.get('/api/research/versions', (req, res) => {
         GROUP BY run_id 
         ORDER BY run_id ASC
     `, [], (err, rows) => {
-        if (err) return res.status(500).json({ error: err.message });
+        if (err) {
+            console.error("GET /api/research/versions created_at error:", err.message);
+            // Fallback to legacy 'timestamp' column if created_at migration failed
+            return db.all(`
+                SELECT run_id, MAX(timestamp) as created_at
+                FROM market_research 
+                WHERE run_id IS NOT NULL 
+                GROUP BY run_id 
+                ORDER BY run_id ASC
+            `, [], (err2, rows2) => {
+                if (err2) {
+                    console.error("GET /api/research/versions fallback error:", err2.message);
+                    return res.status(500).json({ error: err2.message, success: false });
+                }
+                const versions = rows2.map((r, index) => ({ run_id: r.run_id, created_at: r.created_at, version_number: index + 1 }));
+                return res.json({ success: true, data: versions });
+            });
+        }
 
-        // Map to add version_number
-        const versions = rows.map((r, index) => ({
-            run_id: r.run_id,
-            created_at: r.created_at,
-            version_number: index + 1
-        }));
+        const versions = rows.map((r, index) => ({ run_id: r.run_id, created_at: r.created_at, version_number: index + 1 }));
         res.json({ success: true, data: versions });
     });
 });
@@ -247,20 +259,45 @@ app.get('/api/research/version/:run_id', (req, res) => {
         FROM market_research 
         WHERE run_id = ?
     `, [runId], (err, rows) => {
-        if (err) return res.status(500).json({ error: err.message });
+        if (err) {
+            console.error("GET /api/research/version created_at error:", err.message);
+            return db.all(`
+                SELECT category, result, timestamp 
+                FROM market_research 
+                WHERE run_id = ?
+            `, [runId], (err2, rows2) => {
+                if (err2) {
+                    console.error("GET /api/research/version fallback error:", err2.message);
+                    return res.status(500).json({ error: err2.message, success: false });
+                }
+                return res.json({ success: true, data: rows2 });
+            });
+        }
         res.json({ success: true, data: rows });
     });
 });
 
 // Get latest Market Research Results (Backward compatibility)
 app.get('/api/market-research', (req, res) => {
-    // We want the rows belonging to the most recent run_id
     db.all(`
         SELECT category, result, created_at as timestamp 
         FROM market_research 
         WHERE run_id = (SELECT MAX(run_id) FROM market_research)
     `, [], (err, rows) => {
-        if (err) return res.status(500).json({ error: err.message });
+        if (err) {
+            console.error("GET /api/market-research created_at error:", err.message);
+            return db.all(`
+                SELECT category, result, timestamp 
+                FROM market_research 
+                WHERE run_id = (SELECT MAX(run_id) FROM market_research)
+            `, [], (err2, rows2) => {
+                if (err2) {
+                    console.error("GET /api/market-research fallback error:", err2.message);
+                    return res.status(500).json({ error: err2.message, success: false });
+                }
+                return res.json({ success: true, data: rows2 });
+            });
+        }
         res.json({ success: true, data: rows });
     });
 });
