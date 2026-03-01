@@ -439,7 +439,7 @@ export default function Preisueberwachung() {
 
                     {/* Abweichung UVP Filter */}
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                        <label style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Abweichung UVP (> %):</label>
+                        <label style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Abweichung UVP (&gt; %):</label>
                         <input
                             type="number"
                             placeholder="z.B. 20"

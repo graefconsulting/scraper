@@ -3,6 +3,7 @@ import { Routes, Route, NavLink, Navigate } from 'react-router-dom';
 import { Activity, LineChart, Search, LayoutDashboard } from 'lucide-react';
 import Preisueberwachung from './pages/Preisueberwachung';
 import MarketResearch from './pages/MarketResearch';
+import Dashboard from './pages/Dashboard';
 
 function ComingSoon({ title }) {
   return (
@@ -37,8 +38,6 @@ function Sidebar() {
     </div>
   );
 }
-
-import Dashboard from './pages/Dashboard';
 
 function App() {
   return (
