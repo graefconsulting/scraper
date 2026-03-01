@@ -16,10 +16,15 @@ function parseGermanFloat(str) {
 }
 
 function importCSV() {
-    const csvFilePath = path.join(__dirname, '../produkte.csv');
+    // In Docker, __dirname is /app and we mount to /app/produkte.csv
+    // Locally, it's one level up. Let's check both fallback paths.
+    let csvFilePath = path.join(__dirname, '../produkte.csv');
+    if (!fs.existsSync(csvFilePath)) {
+        csvFilePath = path.join(__dirname, 'produkte.csv');
+    }
 
     if (!fs.existsSync(csvFilePath)) {
-        console.error(`CSV file not found at ${csvFilePath}`);
+        console.error(`CSV file not found at either paths (local/docker)!`);
         return;
     }
 
