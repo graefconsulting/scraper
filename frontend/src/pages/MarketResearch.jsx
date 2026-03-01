@@ -60,7 +60,7 @@ export default function MarketResearch() {
     };
 
     // Extract last update time
-    const lastUpdate = researchData.length > 0 ? new Date(researchData[0].created_at).toLocaleString('de-DE') : 'Noch kein Research vorhanden';
+    const lastUpdate = researchData.length > 0 ? new Date(researchData[0].timestamp).toLocaleString('de-DE') : 'Noch kein Research vorhanden';
 
     return (
         <div className="page-container" style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
@@ -102,8 +102,7 @@ export default function MarketResearch() {
                     {researchData.map((item) => (
                         <div key={item.id} className="card" style={{ padding: '2rem' }}>
                             <div style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '1rem', marginBottom: '1.5rem' }}>
-                                <h3 style={{ color: 'var(--primary-color)', fontSize: '1.3rem' }}>{getTypeLabel(item.research_type)}</h3>
-                                <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>Prompt: {item.prompt.substring(0, 100)}...</div>
+                                <h3 style={{ color: 'var(--primary-color)', fontSize: '1.3rem' }}>{getTypeLabel(item.category)}</h3>
                             </div>
                             <div
                                 style={{
@@ -117,7 +116,7 @@ export default function MarketResearch() {
                                     border: '1px solid var(--border-color)'
                                 }}
                             >
-                                {item.raw_response}
+                                {item.result}
                             </div>
                         </div>
                     ))}
