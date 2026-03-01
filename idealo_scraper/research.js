@@ -2,8 +2,6 @@ const axios = require('axios');
 const db = require('./database');
 require('dotenv').config({ path: '../.env' }); // Load .env from root
 
-const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
-
 const queries = [
     {
         category: 'trends',
@@ -32,41 +30,38 @@ const queries = [
 ];
 
 async function runResearch() {
+    const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
     if (!OPENROUTER_API_KEY) {
-        throw new Error("OPENROUTER_API_KEY is not defined in .env");
+        throw new Error("OPENROUTER_API_KEY is not defined in the environment.");
     }
 
     console.log("Starting Market Research run with Perplexity...");
 
     for (const q of queries) {
         console.log(`Querying category: ${q.category}`);
-        try {
-            const response = await axios.post("https://openrouter.ai/api/v1/chat/completions", {
-                model: "perplexity/sonar-pro",
-                messages: [
-                    { role: "user", content: q.prompt }
-                ]
-            }, {
-                headers: {
-                    "Authorization": `Bearer ${OPENROUTER_API_KEY}`,
-                    "Content-Type": "application/json"
-                }
-            });
+        console.log(`Querying category: ${q.category}`);
+        const response = await axios.post("https://openrouter.ai/api/v1/chat/completions", {
+            model: "perplexity/sonar-pro",
+            messages: [
+                { role: "user", content: q.prompt }
+            ]
+        }, {
+            headers: {
+                "Authorization": `Bearer ${OPENROUTER_API_KEY}`,
+                "Content-Type": "application/json"
+            }
+        });
 
-            const content = response.data.choices[0].message.content;
+        const content = response.data.choices[0].message.content;
 
-            // Save to DB
-            db.run(`INSERT INTO market_research (category, result) VALUES (?, ?)`, [q.category, content], (err) => {
-                if (err) console.error(`Error saving research for ${q.category}:`, err.message);
-            });
-            console.log(`Saved result for ${q.category}. Waiting 2s before next query...`);
+        // Save to DB
+        db.run(`INSERT INTO market_research (category, result) VALUES (?, ?)`, [q.category, content], (err) => {
+            if (err) console.error(`Error saving research for ${q.category}:`, err.message);
+        });
+        console.log(`Saved result for ${q.category}. Waiting 2s before next query...`);
 
-            // Wait slightly to not overload API limits
-            await new Promise(res => setTimeout(res, 2000));
-
-        } catch (error) {
-            console.error(`Error querying ${q.category}:`, error.response ? error.response.data : error.message);
-        }
+        // Wait slightly to not overload API limits
+        await new Promise(res => setTimeout(res, 2000));
     }
 
     console.log("Market Research run completed.");
