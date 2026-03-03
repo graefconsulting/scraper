@@ -3,6 +3,39 @@ import { useLocation } from 'react-router-dom';
 import { Search, ChevronUp, ChevronDown, Minus, ExternalLink, Calculator } from 'lucide-react';
 import axios from 'axios';
 
+class ErrorBoundary extends React.Component {
+    constructor(props) {
+        super(props);
+        this.state = { hasError: false, error: null, errorInfo: null };
+    }
+
+    static getDerivedStateFromError(error) {
+        return { hasError: true };
+    }
+
+    componentDidCatch(error, errorInfo) {
+        this.setState({ error, errorInfo });
+        console.error("UI Crash detected:", error, errorInfo);
+    }
+
+    render() {
+        if (this.state.hasError) {
+            return (
+                <div style={{ padding: '2rem', margin: '2rem', border: '2px solid red', borderRadius: '8px', background: '#ffe6e6' }}>
+                    <h2 style={{ color: 'red' }}>UI Crash in Preisüberwachung!</h2>
+                    <p>Bitte teile diesen Fehlertext:</p>
+                    <pre style={{ background: '#fff', padding: '1rem', overflowX: 'auto', border: '1px solid #ccc' }}>
+                        {this.state.error && this.state.error.toString()}
+                        <br />
+                        {this.state.errorInfo && this.state.errorInfo.componentStack}
+                    </pre>
+                </div>
+            );
+        }
+        return this.props.children;
+    }
+}
+
 // --- helper icons ---
 const getTrendIcon = (curr, prev) => {
     if (!prev) return <Minus color="gray" size={16} title="Noch kein Vergleichswert vorhanden" />;
@@ -329,7 +362,7 @@ function ProductCard({ p, defaultCalcOpen, isExpandedAll }) {
     );
 }
 
-export default function Preisueberwachung() {
+function PreisueberwachungContent() {
     const location = useLocation();
     const [products, setProducts] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -666,5 +699,13 @@ export default function Preisueberwachung() {
                 </div>
             )}
         </div>
+    );
+}
+
+export default function Preisueberwachung() {
+    return (
+        <ErrorBoundary>
+            <PreisueberwachungContent />
+        </ErrorBoundary>
     );
 }
