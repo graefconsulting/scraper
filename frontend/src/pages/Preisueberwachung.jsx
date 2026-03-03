@@ -444,7 +444,7 @@ export default function Preisueberwachung() {
 
     if (search) {
         const s = search.toLowerCase();
-        processedData = processedData.filter(p => (p.name?.toLowerCase().includes(s)) || (p.id?.toLowerCase().includes(s)));
+        processedData = processedData.filter(p => (p.name?.toLowerCase()?.includes(s)) || (p.id?.toLowerCase()?.includes(s)));
     }
 
     if (minHandelsspanne !== '') {
