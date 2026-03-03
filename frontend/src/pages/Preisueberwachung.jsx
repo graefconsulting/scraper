@@ -90,8 +90,8 @@ function ProductCard({ p, defaultCalcOpen, isExpandedAll }) {
     }
 
     let projProfit = null;
-    if (ekNetto !== null && p.quantity) {
-        projProfit = (calcNetto - ekNetto) * p.quantity;
+    if (ekNetto !== null) {
+        projProfit = (calcNetto - ekNetto);
     }
 
     let projDiffEur = null;
@@ -109,13 +109,6 @@ function ProductCard({ p, defaultCalcOpen, isExpandedAll }) {
         projDiffPct = (projDiffEur / lowestPrice) * 100;
     }
 
-    let projRank = "-";
-    if (p.currentScrape) {
-        if (calcBruttoVK < (p.currentScrape.rank1_price || 999999)) projRank = "Rang 1";
-        else if (calcBruttoVK < (p.currentScrape.rank2_price || 999999)) projRank = "Rang 2";
-        else projRank = "Schlechter als Rang 2";
-    }
-
     // --- Competitors Data ---
     let allCompetitors = [];
     if (p.currentScrape?.all_competitors) {
@@ -123,6 +116,33 @@ function ProductCard({ p, defaultCalcOpen, isExpandedAll }) {
             allCompetitors = JSON.parse(p.currentScrape.all_competitors) || [];
             if (!Array.isArray(allCompetitors)) allCompetitors = [];
         } catch (e) { console.error("Could not parse all competitors"); }
+    }
+
+    let projRank = "Keine Daten";
+    if (allCompetitors.length > 0) {
+        // Filter out existing HR prices from the pure competition
+        const competitorsOnly = allCompetitors.filter(c => {
+            const shopName = c.shop || "";
+            return !(shopName.toLowerCase().includes('health rise') || shopName.toLowerCase().includes('health-rise'));
+        });
+
+        const compPrices = competitorsOnly.map(c => c.price).filter(price => price !== null && !isNaN(price));
+        compPrices.sort((a, b) => a - b);
+
+        let simulatedRank = 1;
+        for (const price of compPrices) {
+            if (calcBruttoVK > price) {
+                simulatedRank++;
+            } else {
+                break;
+            }
+        }
+        projRank = `Rang ${simulatedRank}`;
+    } else if (p.currentScrape) {
+        // Fallback to top 2 logic if allCompetitors array is entirely missing or empty
+        if (calcBruttoVK < (p.currentScrape.rank1_price || 999999)) projRank = "Rang 1";
+        else if (calcBruttoVK < (p.currentScrape.rank2_price || 999999)) projRank = "Rang 2";
+        else projRank = "Schlechter als Rang 2";
     }
 
     return (
