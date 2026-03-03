@@ -45,6 +45,8 @@ export default function Dashboard() {
     // --- KPI Bar Data Formatting ---
     const formatEur = (val) => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(val || 0);
     const formatPct = (val) => new Intl.NumberFormat('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(val || 0) + '%';
+    const formatEurPlain = (val) => new Intl.NumberFormat('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(val || 0);
+    const formatPctPlain = (val) => new Intl.NumberFormat('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(val || 0);
 
     let lastScrapeStr = "Noch kein Scrape";
     if (data.kpis.letzter_scrape) {
@@ -146,7 +148,7 @@ export default function Dashboard() {
                 callbacks: {
                     label: (ctx) => {
                         const p = ctx.raw;
-                        return `${p.name} | Spanne: ${p.x.toFixed(1)}% | Umsatz: €${p.y.toFixed(0)} | Rang: ${p.rang || '-'}`;
+                        return `${p.name} | Spanne: ${formatPctPlain(p.x)}% | Umsatz: €${formatEurPlain(p.y)} | Rang: ${p.rang || '-'}`;
                     }
                 }
             },
@@ -324,8 +326,8 @@ export default function Dashboard() {
                                                     {formatPct(p.handelsspanne)}
                                                 </td>
                                                 <td style={{ padding: '0.5rem', color: p.diff_guenstigster_eur < 0 ? 'var(--success-color)' : 'var(--danger-color)' }}>
-                                                    {p.diff_guenstigster_eur > 0 ? '+' : ''}{p.diff_guenstigster_eur.toFixed(2)} € <br />
-                                                    <span style={{ fontSize: '0.7rem' }}>({p.diff_guenstigster_pct > 0 ? '+' : ''}{p.diff_guenstigster_pct.toFixed(1)}%)</span>
+                                                    {p.diff_guenstigster_eur > 0 ? '+' : ''}{formatEurPlain(p.diff_guenstigster_eur)} € <br />
+                                                    <span style={{ fontSize: '0.7rem' }}>({p.diff_guenstigster_pct > 0 ? '+' : ''}{formatPctPlain(p.diff_guenstigster_pct)}%)</span>
                                                 </td>
                                                 <td style={{ padding: '0.5rem' }}>{formatEur(p.umsatz)}</td>
                                                 <td style={{ padding: '0.5rem' }}>

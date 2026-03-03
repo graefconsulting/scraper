@@ -98,6 +98,7 @@ async function scrapeUrlForProduct(url, pId) {
             const data = [];
             let healthRiseOffer = null;
             let lowestPriceVal = null;
+            const allCompetitors = [];
 
             const maxToExtract = Math.min(20, offerNodes.length);
 
@@ -156,9 +157,18 @@ async function scrapeUrlForProduct(url, pId) {
                 if (shop.toLowerCase().includes('health rise') || shop.toLowerCase().includes('health-rise')) {
                     healthRiseOffer = { rank: i + 1, price, shop, link };
                 }
+
+                // Collect all competitors
+                allCompetitors.push({ rank: i + 1, price, shop, link });
             }
 
-            return { top2: data, healthRise: healthRiseOffer, lowestPrice: lowestPriceVal, competitorCount: offerNodes.length };
+            return {
+                top2: data,
+                healthRise: healthRiseOffer,
+                lowestPrice: lowestPriceVal,
+                competitorCount: offerNodes.length,
+                allCompetitors: allCompetitors
+            };
         });
 
         console.log(`Scraping successful for ${url}`, results);
@@ -167,17 +177,19 @@ async function scrapeUrlForProduct(url, pId) {
         const rank1 = results.top2[0] || {};
         const rank2 = results.top2[1] || {};
         const hr = results.healthRise || {};
+        const allCompsJson = JSON.stringify(results.allCompetitors || []);
 
         db.run(`
-            INSERT INTO scrapes (product_id, rank1_shop, rank1_price, rank1_link, rank2_shop, rank2_price, rank2_link, hr_rank, hr_price, hr_link, competitor_count, lowest_price) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO scrapes (product_id, rank1_shop, rank1_price, rank1_link, rank2_shop, rank2_price, rank2_link, hr_rank, hr_price, hr_link, competitor_count, lowest_price, all_competitors) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
             pId,
             rank1.shop || null, rank1.price || null, rank1.link || null,
             rank2.shop || null, rank2.price || null, rank2.link || null,
             hr.rank || null, hr.price || null, hr.link || null,
             results.competitorCount || null,
-            results.lowestPrice || null
+            results.lowestPrice || null,
+            allCompsJson
         ]);
 
         return { success: true };
@@ -266,9 +278,14 @@ app.get('/api/dashboard', (req, res) => {
                     marginPct = ((nettoVK - ekNetto) / nettoVK) * 100;
                 }
 
-                let grossProfit = null;
+                let grossProfit = null; // Stored as per unit
+                if (nettoVK !== null && ekNetto !== null) {
+                    grossProfit = nettoVK - ekNetto;
+                }
+
+                let totalGrossProfit = null; // For overall KPI calculation
                 if (nettoVK !== null && ekNetto !== null && p.quantity) {
-                    grossProfit = (nettoVK - ekNetto) * p.quantity;
+                    totalGrossProfit = (nettoVK - ekNetto) * p.quantity;
                 }
 
                 let diffLowestEur = null;
@@ -280,8 +297,10 @@ app.get('/api/dashboard', (req, res) => {
                 ) : 999999;
                 const lowestPrice = lowestRaw || (lowestComp === 999999 ? null : lowestComp);
 
-                if (bruttoVK !== null && lowestPrice !== null) {
-                    diffLowestEur = bruttoVK - lowestPrice;
+                const hrPrice = currentScrape ? currentScrape.hr_price : null; // BUG FIX 1: Use Scraped HR price
+
+                if (hrPrice !== undefined && hrPrice !== null && lowestPrice !== null) {
+                    diffLowestEur = hrPrice - lowestPrice;
                     diffLowestPct = (diffLowestEur / lowestPrice) * 100;
                 }
 
@@ -306,11 +325,11 @@ app.get('/api/dashboard', (req, res) => {
 
                 // Add to global KPIs
                 if (p.revenue_net) gesamtumsatz += p.revenue_net;
-                if (grossProfit) {
-                    gesamtrohertrag += grossProfit;
-                    if (p.revenue_net && marginPct !== null) {
-                        totalWeightedMargin += (marginPct * p.revenue_net);
-                    }
+                if (totalGrossProfit) {
+                    gesamtrohertrag += totalGrossProfit;
+                }
+                if (totalGrossProfit && p.revenue_net && marginPct !== null) {
+                    totalWeightedMargin += (marginPct * p.revenue_net);
                 }
 
                 // Build handlungsbedarf item
