@@ -110,6 +110,19 @@ function createTables() {
             }
         });
 
+        // Migration: Add lowest_price if missing from older schemas
+        db.all("PRAGMA table_info(scrapes);", (err, rows) => {
+            if (!err && rows) {
+                const hasLowestPrice = rows.some(r => r.name === 'lowest_price');
+                if (!hasLowestPrice) {
+                    db.run("ALTER TABLE scrapes ADD COLUMN lowest_price REAL;", (err) => {
+                        if (err) console.error("Migration failed:", err.message);
+                        else console.log("Migration: Added lowest_price to scrapes table.");
+                    });
+                }
+            }
+        });
+
         // Migration: Add all_competitors if missing from older schemas
         db.all("PRAGMA table_info(scrapes);", (err, rows) => {
             if (!err && rows) {

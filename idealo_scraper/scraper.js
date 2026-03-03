@@ -190,7 +190,13 @@ async function scrapeUrlForProduct(url, pId) {
             results.competitorCount || null,
             results.lowestPrice || null,
             allCompsJson
-        ]);
+        ], (err) => {
+            if (err) {
+                console.error(`DB Insert Error for ${pId}:`, err.message);
+            } else {
+                console.log(`Successfully saved scrape for ${url} to DB.`);
+            }
+        });
 
         return { success: true };
     } catch (err) {
