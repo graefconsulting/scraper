@@ -87,7 +87,8 @@ function ProductCard({ p, defaultCalcOpen, isExpandedAll }) {
     let allCompetitors = [];
     if (p.currentScrape?.all_competitors) {
         try {
-            allCompetitors = JSON.parse(p.currentScrape.all_competitors);
+            allCompetitors = JSON.parse(p.currentScrape.all_competitors) || [];
+            if (!Array.isArray(allCompetitors)) allCompetitors = [];
         } catch (e) { console.error("Could not parse all competitors"); }
     }
 
@@ -224,7 +225,8 @@ function ProductCard({ p, defaultCalcOpen, isExpandedAll }) {
                                                         </thead>
                                                         <tbody>
                                                             {allCompetitors.map((comp, idx) => {
-                                                                const isHr = comp.shop.toLowerCase().includes('health rise') || comp.shop.toLowerCase().includes('health-rise');
+                                                                const shopName = comp.shop || "";
+                                                                const isHr = shopName.toLowerCase().includes('health rise') || shopName.toLowerCase().includes('health-rise');
                                                                 return (
                                                                     <tr key={idx} style={{
                                                                         borderBottom: '1px solid var(--border-color)',
