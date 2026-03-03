@@ -368,6 +368,7 @@ function PreisueberwachungContent() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [isScraping, setIsScraping] = useState(false);
+    const [isExpandedAll, setIsExpandedAll] = useState(null);
 
     // Filtering & Sorting State
     const [search, setSearch] = useState(location.state?.prefilterSku || '');
