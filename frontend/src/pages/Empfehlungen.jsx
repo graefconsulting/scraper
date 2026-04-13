@@ -4,6 +4,7 @@ import {
     Search, Megaphone, Trash2, Lock, ArrowUpCircle, ArrowDownCircle,
     Sparkles, ChevronDown, ChevronUp, Check, AlertTriangle,
 } from 'lucide-react';
+import ProductDetail from '../components/ProductDetail';
 
 // localStorage keys (kompatibel zu Preisänderungen-Seite)
 const DELIST_KEY = 'hr_delist_decisions';
@@ -232,16 +233,44 @@ function Td({ children, align = 'right', color, weight, style }) {
         }}>{children}</td>
     );
 }
-function ProductCell({ p }) {
+function ProductCell({ p, isExpanded, onToggle }) {
     return (
-        <td style={{ padding: '0.55rem 0.75rem', borderBottom: '1px solid var(--border-color)', maxWidth: 280 }}>
-            <div style={{ fontWeight: 600, fontSize: '0.85rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</div>
-            <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', display: 'flex', gap: '0.5rem' }}>
-                <span style={{ fontFamily: 'monospace' }}>{p.sku}</span>
-                {p.hersteller && <span>· {p.hersteller}</span>}
-                {p.ekRabattAktiv && <span style={{ color: '#10b981' }}>· EK −5%</span>}
+        <td
+            onClick={onToggle}
+            style={{
+                padding: '0.55rem 0.75rem', borderBottom: '1px solid var(--border-color)',
+                maxWidth: 280, cursor: 'pointer', userSelect: 'none',
+            }}
+            onMouseEnter={e => e.currentTarget.style.backgroundColor = '#f8fafc'}
+            onMouseLeave={e => e.currentTarget.style.backgroundColor = ''}
+        >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                {isExpanded
+                    ? <ChevronUp size={14} color="var(--text-muted)" style={{ flexShrink: 0 }} />
+                    : <ChevronDown size={14} color="var(--text-muted)" style={{ flexShrink: 0 }} />
+                }
+                <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontWeight: 600, fontSize: '0.85rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</div>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', display: 'flex', gap: '0.5rem' }}>
+                        <span style={{ fontFamily: 'monospace' }}>{p.sku}</span>
+                        {p.hersteller && <span>· {p.hersteller}</span>}
+                        {p.ekRabattAktiv && <span style={{ color: '#10b981' }}>· EK −5%</span>}
+                    </div>
+                </div>
             </div>
         </td>
+    );
+}
+
+function ExpandedRow({ p, colSpan, onSavePrice }) {
+    return (
+        <tr>
+            <td colSpan={colSpan} style={{ padding: 0, background: '#f8fafc', borderBottom: '1px solid var(--border-color)' }}>
+                <div style={{ borderTop: '2px solid var(--border-color)' }}>
+                    <ProductDetail p={p} onSavePrice={onSavePrice} />
+                </div>
+            </td>
+        </tr>
     );
 }
 function ActionButton({ active, onClick, label, color }) {
@@ -277,6 +306,34 @@ export default function Empfehlungen() {
     const [adsOff, setAdsOff] = useState(() => JSON.parse(localStorage.getItem(ADS_OFF_KEY) || '{}'));
     const [priceChanges, setPriceChanges] = useState(() => JSON.parse(localStorage.getItem(PRICE_CHANGES_KEY) || '{}'));
     const [dtp, setDtp] = useState(() => JSON.parse(localStorage.getItem(DAUERTIEFPREIS_KEY) || '{}'));
+    const [expandedSkus, setExpandedSkus] = useState({});
+
+    const toggleExpand = (sku) => {
+        setExpandedSkus(prev => {
+            const n = { ...prev };
+            if (n[sku]) delete n[sku]; else n[sku] = true;
+            return n;
+        });
+    };
+
+    // Manual price save from Preisrechner inside ProductDetail
+    const savePriceFromCalculator = (product, newBrutto, newNetto, newMargeProz, newMargeSt) => {
+        const u = { ...priceChanges };
+        u[product.sku] = {
+            sku: product.sku, name: product.name,
+            alterBrutto: product.vkBrutto, alterNetto: product.vkNetto,
+            neuerBrutto: parseFloat(newBrutto.toFixed(2)),
+            neuerNetto: parseFloat(newNetto.toFixed(4)),
+            alteRealeMarge: product.realeMargeProz,
+            neueRealeMarge: newMargeProz,
+            neueMargeStueck: newMargeSt,
+            preisdiffEur: parseFloat((newBrutto - (product.vkBrutto || 0)).toFixed(2)),
+            preisdiffPct: product.vkBrutto > 0 ? ((newBrutto - product.vkBrutto) / product.vkBrutto) * 100 : null,
+            action: 'manuell',
+            timestamp: new Date().toISOString(),
+        };
+        persist(PRICE_CHANGES_KEY, u, setPriceChanges);
+    };
 
     const persist = (key, value, setter) => {
         localStorage.setItem(key, JSON.stringify(value));
@@ -457,17 +514,21 @@ export default function Empfehlungen() {
                             <tbody>
                                 {filtered.map(p => {
                                     const c = p._c;
+                                    const exp = !!expandedSkus[p.sku];
                                     return (
-                                        <tr key={p.sku}>
-                                            <ProductCell p={p} />
-                                            <Td color="#ef4444" weight={700}>{fmtPct(c.m_real)}</Td>
-                                            <Td color={c.m_ohne_werbung >= 0 ? '#10b981' : '#ef4444'} weight={600}>{fmtPct(c.m_ohne_werbung)}</Td>
-                                            <Td>{fmtEur(c.werbeQ1)}</Td>
-                                            <Td color="#10b981" weight={700}>{fmtEur(c.werbeMonat)}</Td>
-                                            <Td align="center">
-                                                <ActionButton active={!!adsOff[p.sku]} onClick={() => toggleAdsOff(p)} label="Werbung aus" color="#dc2626" />
-                                            </Td>
-                                        </tr>
+                                        <React.Fragment key={p.sku}>
+                                            <tr>
+                                                <ProductCell p={p} isExpanded={exp} onToggle={() => toggleExpand(p.sku)} />
+                                                <Td color="#ef4444" weight={700}>{fmtPct(c.m_real)}</Td>
+                                                <Td color={c.m_ohne_werbung >= 0 ? '#10b981' : '#ef4444'} weight={600}>{fmtPct(c.m_ohne_werbung)}</Td>
+                                                <Td>{fmtEur(c.werbeQ1)}</Td>
+                                                <Td color="#10b981" weight={700}>{fmtEur(c.werbeMonat)}</Td>
+                                                <Td align="center">
+                                                    <ActionButton active={!!adsOff[p.sku]} onClick={() => toggleAdsOff(p)} label="Werbung aus" color="#dc2626" />
+                                                </Td>
+                                            </tr>
+                                            {exp && <ExpandedRow p={p} colSpan={6} onSavePrice={savePriceFromCalculator} />}
+                                        </React.Fragment>
                                     );
                                 })}
                             </tbody>
@@ -495,18 +556,22 @@ export default function Empfehlungen() {
                             <tbody>
                                 {filtered.map(p => {
                                     const c = p._c;
+                                    const exp = !!expandedSkus[p.sku];
                                     return (
-                                        <tr key={p.sku}>
-                                            <ProductCell p={p} />
-                                            <Td color="#ef4444" weight={700}>{fmtPct(c.m_real)}</Td>
-                                            <Td color="#ef4444" weight={600}>{fmtPct(c.m_ohne_werbung)}</Td>
-                                            <Td>{fmtEur(p.ekNetto)}</Td>
-                                            <Td>{fmtEur(p.vkBrutto)}</Td>
-                                            <Td color="var(--text-muted)">{fmt(p.menge90d, 0)}</Td>
-                                            <Td align="center">
-                                                <ActionButton active={!!delisted[p.sku]} onClick={() => toggleDelist(p)} label="Auslisten" color="#7c2d12" />
-                                            </Td>
-                                        </tr>
+                                        <React.Fragment key={p.sku}>
+                                            <tr>
+                                                <ProductCell p={p} isExpanded={exp} onToggle={() => toggleExpand(p.sku)} />
+                                                <Td color="#ef4444" weight={700}>{fmtPct(c.m_real)}</Td>
+                                                <Td color="#ef4444" weight={600}>{fmtPct(c.m_ohne_werbung)}</Td>
+                                                <Td>{fmtEur(p.ekNetto)}</Td>
+                                                <Td>{fmtEur(p.vkBrutto)}</Td>
+                                                <Td color="var(--text-muted)">{fmt(p.menge90d, 0)}</Td>
+                                                <Td align="center">
+                                                    <ActionButton active={!!delisted[p.sku]} onClick={() => toggleDelist(p)} label="Auslisten" color="#7c2d12" />
+                                                </Td>
+                                            </tr>
+                                            {exp && <ExpandedRow p={p} colSpan={7} onSavePrice={savePriceFromCalculator} />}
+                                        </React.Fragment>
                                     );
                                 })}
                             </tbody>
@@ -534,18 +599,22 @@ export default function Empfehlungen() {
                             <tbody>
                                 {filtered.map(p => {
                                     const c = p._c;
+                                    const exp = !!expandedSkus[p.sku];
                                     return (
-                                        <tr key={p.sku}>
-                                            <ProductCell p={p} />
-                                            <Td color="#10b981" weight={600}>{fmtPct(c.margeNormal)}</Td>
-                                            <Td color="#ef4444" weight={700}>{fmtPct(c.margeRabatt)}</Td>
-                                            <Td color="#ef4444" weight={600}>{fmtEur(c.gewinnRabattStueck)}</Td>
-                                            <Td color="#ef4444" weight={700}>{fmtEur(c.verlustRabatt)}</Td>
-                                            <Td>{fmt(c.mengeRabatt, 0)}</Td>
-                                            <Td align="center">
-                                                <ActionButton active={!!dtp[p.sku]} onClick={() => toggleDtp(p, c)} label="Dauertiefpreis" color="#a16207" />
-                                            </Td>
-                                        </tr>
+                                        <React.Fragment key={p.sku}>
+                                            <tr>
+                                                <ProductCell p={p} isExpanded={exp} onToggle={() => toggleExpand(p.sku)} />
+                                                <Td color="#10b981" weight={600}>{fmtPct(c.margeNormal)}</Td>
+                                                <Td color="#ef4444" weight={700}>{fmtPct(c.margeRabatt)}</Td>
+                                                <Td color="#ef4444" weight={600}>{fmtEur(c.gewinnRabattStueck)}</Td>
+                                                <Td color="#ef4444" weight={700}>{fmtEur(c.verlustRabatt)}</Td>
+                                                <Td>{fmt(c.mengeRabatt, 0)}</Td>
+                                                <Td align="center">
+                                                    <ActionButton active={!!dtp[p.sku]} onClick={() => toggleDtp(p, c)} label="Dauertiefpreis" color="#a16207" />
+                                                </Td>
+                                            </tr>
+                                            {exp && <ExpandedRow p={p} colSpan={7} onSavePrice={savePriceFromCalculator} />}
+                                        </React.Fragment>
                                     );
                                 })}
                             </tbody>
@@ -575,22 +644,26 @@ export default function Empfehlungen() {
                                 {filtered.map(p => {
                                     const c = p._c;
                                     const saved = !!priceChanges[p.sku];
+                                    const exp = !!expandedSkus[p.sku];
                                     return (
-                                        <tr key={p.sku}>
-                                            <ProductCell p={p} />
-                                            <Td>{fmtEur(p.vkBrutto)}</Td>
-                                            <Td color="#0369a1" weight={700}>{fmtEur(c.newVkBrutto)}</Td>
-                                            <Td color="#0369a1">+{fmt(c.priceIncreasePct, 1)}%</Td>
-                                            <Td color="#ef4444">{fmtPct(c.margeRabatt)}</Td>
-                                            <Td color="#10b981" weight={700}>{fmtPct(c.newMargeRabatt)}</Td>
-                                            <Td color="var(--text-muted)" style={{ fontSize: '0.78rem' }}>
-                                                {c.isRank1 ? 'Rang 1' : (p.currentScrape?.hr_rank ? `Rang ${p.currentScrape.hr_rank}` : '–')}
-                                                {c.rank1 && ` / ${fmt(c.rank1)}€`}
-                                            </Td>
-                                            <Td align="center">
-                                                <ActionButton active={saved} onClick={() => togglePrice(p, c, 'erhoehen')} label="Übernehmen" color="#0369a1" />
-                                            </Td>
-                                        </tr>
+                                        <React.Fragment key={p.sku}>
+                                            <tr>
+                                                <ProductCell p={p} isExpanded={exp} onToggle={() => toggleExpand(p.sku)} />
+                                                <Td>{fmtEur(p.vkBrutto)}</Td>
+                                                <Td color="#0369a1" weight={700}>{fmtEur(c.newVkBrutto)}</Td>
+                                                <Td color="#0369a1">+{fmt(c.priceIncreasePct, 1)}%</Td>
+                                                <Td color="#ef4444">{fmtPct(c.margeRabatt)}</Td>
+                                                <Td color="#10b981" weight={700}>{fmtPct(c.newMargeRabatt)}</Td>
+                                                <Td color="var(--text-muted)" style={{ fontSize: '0.78rem' }}>
+                                                    {c.isRank1 ? 'Rang 1' : (p.currentScrape?.hr_rank ? `Rang ${p.currentScrape.hr_rank}` : '–')}
+                                                    {c.rank1 && ` / ${fmt(c.rank1)}€`}
+                                                </Td>
+                                                <Td align="center">
+                                                    <ActionButton active={saved} onClick={() => togglePrice(p, c, 'erhoehen')} label="Übernehmen" color="#0369a1" />
+                                                </Td>
+                                            </tr>
+                                            {exp && <ExpandedRow p={p} colSpan={8} onSavePrice={savePriceFromCalculator} />}
+                                        </React.Fragment>
                                     );
                                 })}
                             </tbody>
@@ -621,22 +694,26 @@ export default function Empfehlungen() {
                                     const c = p._c;
                                     const saved = !!priceChanges[p.sku];
                                     const diffPct = ((c.newVkBrutto - p.vkBrutto) / p.vkBrutto) * 100;
+                                    const exp = !!expandedSkus[p.sku];
                                     return (
-                                        <tr key={p.sku}>
-                                            <ProductCell p={p} />
-                                            <Td>{fmtEur(p.vkBrutto)}</Td>
-                                            <Td color="#15803d" weight={700}>{fmtEur(c.newVkBrutto)}</Td>
-                                            <Td color="#15803d">{fmt(diffPct, 1)}%</Td>
-                                            <Td color="#10b981">{fmtPct(c.margeRabatt)}</Td>
-                                            <Td color="#10b981" weight={700}>{fmtPct(c.newMargeRabatt)}</Td>
-                                            <Td color="var(--text-muted)" style={{ fontSize: '0.78rem' }}>
-                                                {p.currentScrape?.hr_rank ? `Rang ${p.currentScrape.hr_rank}` : '–'}
-                                                {c.rank1 && ` / ${fmt(c.rank1)}€`}
-                                            </Td>
-                                            <Td align="center">
-                                                <ActionButton active={saved} onClick={() => togglePrice(p, c, 'senken')} label="Übernehmen" color="#15803d" />
-                                            </Td>
-                                        </tr>
+                                        <React.Fragment key={p.sku}>
+                                            <tr>
+                                                <ProductCell p={p} isExpanded={exp} onToggle={() => toggleExpand(p.sku)} />
+                                                <Td>{fmtEur(p.vkBrutto)}</Td>
+                                                <Td color="#15803d" weight={700}>{fmtEur(c.newVkBrutto)}</Td>
+                                                <Td color="#15803d">{fmt(diffPct, 1)}%</Td>
+                                                <Td color="#10b981">{fmtPct(c.margeRabatt)}</Td>
+                                                <Td color="#10b981" weight={700}>{fmtPct(c.newMargeRabatt)}</Td>
+                                                <Td color="var(--text-muted)" style={{ fontSize: '0.78rem' }}>
+                                                    {p.currentScrape?.hr_rank ? `Rang ${p.currentScrape.hr_rank}` : '–'}
+                                                    {c.rank1 && ` / ${fmt(c.rank1)}€`}
+                                                </Td>
+                                                <Td align="center">
+                                                    <ActionButton active={saved} onClick={() => togglePrice(p, c, 'senken')} label="Übernehmen" color="#15803d" />
+                                                </Td>
+                                            </tr>
+                                            {exp && <ExpandedRow p={p} colSpan={8} onSavePrice={savePriceFromCalculator} />}
+                                        </React.Fragment>
                                     );
                                 })}
                             </tbody>
@@ -665,18 +742,22 @@ export default function Empfehlungen() {
                                 {filtered.map(p => {
                                     const c = p._c;
                                     const saved = !!priceChanges[p.sku];
+                                    const exp = !!expandedSkus[p.sku];
                                     return (
-                                        <tr key={p.sku}>
-                                            <ProductCell p={p} />
-                                            <Td>{fmtEur(p.vkBrutto)}</Td>
-                                            <Td color="#7e22ce" weight={700}>{fmtEur(c.newVkBrutto)}</Td>
-                                            <Td color="var(--text-muted)">{fmtEur(c.rank2)}</Td>
-                                            <Td color="#10b981">{fmtPct(c.margeRabatt)}</Td>
-                                            <Td color="#10b981" weight={700}>{fmtPct(c.newMargeRabatt)}</Td>
-                                            <Td align="center">
-                                                <ActionButton active={saved} onClick={() => togglePrice(p, c, 'hochtest')} label="Übernehmen" color="#7e22ce" />
-                                            </Td>
-                                        </tr>
+                                        <React.Fragment key={p.sku}>
+                                            <tr>
+                                                <ProductCell p={p} isExpanded={exp} onToggle={() => toggleExpand(p.sku)} />
+                                                <Td>{fmtEur(p.vkBrutto)}</Td>
+                                                <Td color="#7e22ce" weight={700}>{fmtEur(c.newVkBrutto)}</Td>
+                                                <Td color="var(--text-muted)">{fmtEur(c.rank2)}</Td>
+                                                <Td color="#10b981">{fmtPct(c.margeRabatt)}</Td>
+                                                <Td color="#10b981" weight={700}>{fmtPct(c.newMargeRabatt)}</Td>
+                                                <Td align="center">
+                                                    <ActionButton active={saved} onClick={() => togglePrice(p, c, 'hochtest')} label="Übernehmen" color="#7e22ce" />
+                                                </Td>
+                                            </tr>
+                                            {exp && <ExpandedRow p={p} colSpan={7} onSavePrice={savePriceFromCalculator} />}
+                                        </React.Fragment>
                                     );
                                 })}
                             </tbody>
