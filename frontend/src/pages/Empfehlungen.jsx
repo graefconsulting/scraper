@@ -45,8 +45,10 @@ function classify(p) {
         : rabattMenge > normalMenge * 5;
 
     // Tier 1 (NEU): Werbeausgaben optimieren
-    // Produkt wäre ohne Werbung gesund (>10%), aber ACoS frisst Marge (>10% Umsatz)
-    if (m_ohne_werbung !== null && m_ohne_werbung > 10 && wkAnteil > 10 && m_real < 5 && has_ads) {
+    // Produkt wäre ohne Werbung gesund (>10%), ACoS > 15% (normaler Bereich 10-12% ist ok),
+    // Verlust > 2% des Umsatzes, UND Optimierung (ACoS halbieren) führt zu akzeptablem Ergebnis
+    const projectedMarge = m_real + wkAnteil / 2;
+    if (m_ohne_werbung !== null && m_ohne_werbung > 10 && wkAnteil > 15 && m_real < -2 && has_ads && projectedMarge > -5) {
         const targetAcos = wkAnteil / 2;
         const einsparMonat = (p.werbekosten || 0) / 3 / 2;
         return {
@@ -105,7 +107,9 @@ function classify(p) {
     const margeRabatt = vkNRabatt > 0 ? (gewinnRabatt / vkNRabatt) * 100 : null;
 
     // Tier 5: Aus Rabattaktion nehmen — normal profitabel, im Rabatt Verlust
-    if (margeNormal >= 5 && gewinnRabatt < 0 && !p.dauertiefpreis) {
+    // Prüft sowohl Per-Unit-Schätzung ALS AUCH tatsächliches Quartalsergebnis (verhindert
+    // Fehlklassifizierung wenn Werbekosten ungleich auf Perioden verteilt sind)
+    if (margeNormal >= 5 && gewinnRabatt < 0 && (p.rabattPeriode?.gewinn || 0) < 0 && !p.dauertiefpreis) {
         return {
             tier: 5,
             margeNormal, margeRabatt,
