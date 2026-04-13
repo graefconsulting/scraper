@@ -1,6 +1,6 @@
 import React from 'react';
 import { Routes, Route, NavLink, Navigate } from 'react-router-dom';
-import { Search, LayoutDashboard, Settings, BarChart3, Lightbulb, ArrowRightLeft } from 'lucide-react';
+import { Search, LayoutDashboard, Settings, BarChart3, Lightbulb, ArrowRightLeft, Tag } from 'lucide-react';
 import Preisueberwachung from './pages/Preisueberwachung';
 import MarketResearch from './pages/MarketResearch';
 import Dashboard from './pages/Dashboard';
@@ -8,6 +8,7 @@ import Einstellungen from './pages/Einstellungen';
 import Auswertung from './pages/Auswertung';
 import Empfehlungen from './pages/Empfehlungen';
 import Preisaenderungen from './pages/Preisaenderungen';
+import Rabattaktion from './pages/Rabattaktion';
 
 function Sidebar() {
   return (
@@ -32,6 +33,9 @@ function Sidebar() {
           <NavLink to="/preisaenderungen" className={({ isActive }) => "nav-item " + (isActive ? "active" : "")}>
             <ArrowRightLeft /> Preisänderungen
           </NavLink>
+          <NavLink to="/rabattaktion" className={({ isActive }) => "nav-item " + (isActive ? "active" : "")}>
+            <Tag /> Rabattaktion
+          </NavLink>
         </div>
         <div style={{ marginTop: 'auto', borderTop: '1px solid var(--border-color)', paddingTop: '0.5rem' }}>
           <NavLink to="/einstellungen" className={({ isActive }) => "nav-item " + (isActive ? "active" : "")}>
@@ -55,6 +59,7 @@ function App() {
           <Route path="/auswertung" element={<Auswertung />} />
           <Route path="/empfehlungen" element={<Empfehlungen />} />
           <Route path="/preisaenderungen" element={<Preisaenderungen />} />
+          <Route path="/rabattaktion" element={<Rabattaktion />} />
           <Route path="/preisueberwachung" element={<Preisueberwachung />} />
           <Route path="/einstellungen" element={<Einstellungen />} />
         </Routes>
