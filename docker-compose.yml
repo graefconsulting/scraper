@@ -5,8 +5,6 @@ services:
     build:
       context: ./idealo_scraper
       dockerfile: Dockerfile
-    ports:
-      - "3000:3000"
     restart: always
     env_file:
       - .env
@@ -18,8 +16,21 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-    ports:
-      - "8080:80"
     restart: always
     depends_on:
       - backend
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.scraper.rule=Host(`hr.graef-ai-consulting.de`)"
+      - "traefik.http.routers.scraper.tls=true"
+      - "traefik.http.routers.scraper.entrypoints=websecure"
+      - "traefik.http.routers.scraper.tls.certresolver=mytlschallenge"
+      - "traefik.http.services.scraper.loadbalancer.server.port=80"
+    networks:
+      - default
+      - traefik_public
+
+networks:
+  traefik_public:
+    external: true
+    name: root_default
