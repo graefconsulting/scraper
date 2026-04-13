@@ -750,6 +750,46 @@ function isDiscountDate(ddmmyyyy) {
     return DISCOUNT_PERIODS.some(([from, to]) => iso >= from && iso <= to);
 }
 
+// Hersteller, die 5% Rabatt auf den Einkaufspreis gewähren — wird automatisch vom EK abgezogen
+const HERSTELLER_RABATT_5_PCT = new Set([
+    'Raab Vitalfood', 'Martina Gebhardt', 'Yogi Tea', 'hübner', 'Santaverde',
+    'SANTE', 'Primavera', 'Urtekram', 'Salus', 'Hoyer', 'GSE', "Argand'Or",
+    'FITNE', 'Weleda', 'Sanatura', 'Schoenenberger', 'P. Jentschura', 'Lavera',
+    'Sanatur', 'Schalk Mühle', 'Tautropfen', 'Berk', 'Droste Laux', 'Bio Planète',
+    'Kruut', 'Laboratoires de Biarritz', 'Luvos', 'Farfalla', 'Larnac Manuka',
+    'i+m', 'Eliah Sahil', 'Insieme', 'Logona', 'Niyok', 'TranzAlpine',
+    'Arche Naturküche', 'Balmyou', 'Bioturm', 'Elysius', 'Fair Squared',
+    'Ihle Vital', 'Lebensbaum', 'Sonnentor', 'Speick',
+].map(h => h.toLowerCase()));
+
+function hasHerstellerRabatt(hersteller) {
+    return hersteller && HERSTELLER_RABATT_5_PCT.has(hersteller.toLowerCase());
+}
+
+// Determine hersteller for a product (Q1 data takes precedence, fallback to name match)
+function determineHersteller(prod, q1, allHersteller) {
+    let h = q1 && q1['Hersteller'] ? String(q1['Hersteller']).trim() : null;
+    if (h) return h;
+    const nameLower = (prod['Produktname'] || '').toLowerCase();
+    for (const cand of allHersteller) {
+        const idx = nameLower.indexOf(cand.toLowerCase());
+        if (idx >= 0) {
+            const end = idx + cand.length;
+            if ((idx === 0 || !nameLower[idx-1].match(/[a-z]/)) &&
+                (end >= nameLower.length || !nameLower[end].match(/[a-z]/))) {
+                return cand;
+            }
+        }
+    }
+    return null;
+}
+
+// Apply 5% Hersteller-Rabatt to EK if applicable
+function ekMitRabatt(rawEk, hersteller) {
+    if (rawEk === null || rawEk === undefined || isNaN(rawEk)) return null;
+    return hasHerstellerRabatt(hersteller) ? rawEk * 0.95 : rawEk;
+}
+
 // Helper: parse CSV file into array of row objects
 function parseCSV(filePath) {
     const raw = fs.readFileSync(filePath, 'utf-8');
@@ -943,7 +983,10 @@ app.get('/api/auswertung', (req, res) => {
                 const q1 = q1Map[skuUpper] || {};
                 const orders = orderData[skuUpper] || null;
 
-                const ekNetto = r2(parseDeNum(prod['EK_Netto']));
+                // Determine hersteller first (needed for EK discount)
+                const hersteller = determineHersteller(prod, q1, allHersteller);
+                const ekRabattAktiv = hasHerstellerRabatt(hersteller);
+                const ekNetto = r2(ekMitRabatt(parseDeNum(prod['EK_Netto']), hersteller));
                 const vkNetto = r2(parseDeNum(prod['VK_Netto']));
                 const mwst = parseDeNum(prod['MwSt_Satz']);
                 const vkBrutto = (vkNetto !== null && mwst !== null) ? r2(vkNetto * (1 + mwst / 100)) : null;
@@ -1005,22 +1048,6 @@ app.get('/api/auswertung', (req, res) => {
                     realeMargeStueck = vkNetto > 0 ? r2(vkNetto * realeMargeProz / 100) : null;
                 }
 
-                // Hersteller: Q1 first, then name matching
-                let hersteller = q1['Hersteller'] ? String(q1['Hersteller']).trim() : null;
-                if (!hersteller) {
-                    const nameLower = (prod['Produktname'] || '').toLowerCase();
-                    for (const h of allHersteller) {
-                        const idx = nameLower.indexOf(h.toLowerCase());
-                        if (idx >= 0) {
-                            const end = idx + h.length;
-                            if ((idx === 0 || !nameLower[idx-1].match(/[a-z]/)) && (end >= nameLower.length || !nameLower[end].match(/[a-z]/))) {
-                                hersteller = h;
-                                break;
-                            }
-                        }
-                    }
-                }
-
                 // Truncate product name at first |
                 let name = prod['Produktname'] || '';
                 const pipeIdx = name.indexOf('|');
@@ -1057,6 +1084,7 @@ app.get('/api/auswertung', (req, res) => {
                     googleKosten, idealoKosten, msKosten,
                     q1Menge: menge90d,
                     hersteller,
+                    ekRabattAktiv,
                     // Idealo
                     idealoLink: idealoLinks[skuUpper] || null,
                     currentScrape: (scrapesByProduct[skuUpper] || [])[0] || null,
@@ -1109,9 +1137,10 @@ app.post('/api/auswertung/scrape/start', (req, res) => {
                 if (sku) csvProducts[sku.toUpperCase()] = row;
             }
 
-            // Load Q1 for cost data
+            // Load Q1 for cost data + Hersteller list
             const xlsxPath = path.join(dataDir, 'Produkte-Q1.xlsx');
             let q1Map = {};
+            let allHersteller = [];
             if (fs.existsSync(xlsxPath)) {
                 const wb = XLSX.readFile(xlsxPath);
                 const ws = wb.Sheets[wb.SheetNames[0]];
@@ -1119,6 +1148,9 @@ app.post('/api/auswertung/scrape/start', (req, res) => {
                     const sku = String(r['Artikelnummer'] || '').trim().toUpperCase();
                     if (sku) q1Map[sku] = r;
                 });
+                const hSet = new Set();
+                Object.values(q1Map).forEach(r => { if (r['Hersteller']) hSet.add(String(r['Hersteller']).trim()); });
+                allHersteller = [...hSet].sort();
             }
 
             // Load Idealo links
@@ -1154,7 +1186,13 @@ app.post('/api/auswertung/scrape/start', (req, res) => {
 
                 // Calculate real margin to exclude < -2%
                 const vkNetto = parseDeNum(csv['VK_Netto']);
-                const ekNetto = parseDeNum(csv['EK_Netto']);
+                // Map Produktexport.csv field names to determineHersteller's expected key
+                const hersteller = determineHersteller(
+                    { Produktname: csv['Produktname'] },
+                    q1Map[skuUpper],
+                    allHersteller
+                );
+                const ekNetto = ekMitRabatt(parseDeNum(csv['EK_Netto']), hersteller);
                 const q1 = q1Map[skuUpper] || {};
                 const q1Menge = parseDeNum(q1['Menge']) || 0;
                 const q1UmsatzNetto = parseDeNum(q1['Umsatz_Netto']);
@@ -1226,21 +1264,27 @@ app.get('/api/empfehlungen/zero-revenue', (req, res) => {
             });
         }
 
-        // Load Q1 for Werbekosten
+        // Load Q1 for Werbekosten + Hersteller
         const q1Path = path.join(dataDir, 'Produkte-Q1.xlsx');
         let q1Ads = {};
+        let q1Map = {};
+        let allHersteller = [];
         if (fs.existsSync(q1Path)) {
             const wb = XLSX.readFile(q1Path);
             const ws = wb.Sheets[wb.SheetNames[0]];
             XLSX.utils.sheet_to_json(ws, { defval: null }).forEach(r => {
                 const sku = String(r['Artikelnummer'] || '').trim().toUpperCase();
                 if (sku) {
+                    q1Map[sku] = r;
                     const g = parseDeNum(r['Google']) || 0;
                     const i = parseDeNum(r['Idealo']) || 0;
                     const m = parseDeNum(r['MS']) || 0;
                     if (g + i + m > 0) q1Ads[sku] = { google: g, idealo: i, ms: m, total: g + i + m };
                 }
             });
+            const hSet = new Set();
+            Object.values(q1Map).forEach(r => { if (r['Hersteller']) hSet.add(String(r['Hersteller']).trim()); });
+            allHersteller = [...hSet].sort();
         }
 
         const idealoLinks = loadIdealoLinks(dataDir);
@@ -1266,7 +1310,9 @@ app.get('/api/empfehlungen/zero-revenue', (req, res) => {
                 if (EXCLUDED_SKUS.has(skuUpper)) return;
                 if (skusWithOrders.has(skuUpper)) return;
 
-                const ekNetto = r2(parseDeNum(r['EK_Netto']));
+                const hersteller = determineHersteller(r, q1Map[skuUpper], allHersteller);
+                const ekRabattAktiv = hasHerstellerRabatt(hersteller);
+                const ekNetto = r2(ekMitRabatt(parseDeNum(r['EK_Netto']), hersteller));
                 const vkNetto = r2(parseDeNum(r['VK_Netto']));
                 const mwst = parseDeNum(r['MwSt_Satz']);
                 const vkBrutto = (vkNetto !== null && mwst !== null) ? r2(vkNetto * (1 + mwst / 100)) : null;
@@ -1286,6 +1332,7 @@ app.get('/api/empfehlungen/zero-revenue', (req, res) => {
                 results.push({
                     sku, name, ekNetto, vkNetto, vkBrutto, mwst, handelsspanne,
                     abverkauf, verfuegbar, bestand,
+                    hersteller, ekRabattAktiv,
                     werbekosten: ads ? ads.total : 0,
                     googleKosten: ads ? ads.google : 0,
                     idealoKosten: ads ? ads.idealo : 0,
@@ -1325,6 +1372,22 @@ app.post('/api/empfehlungen/scrape/start', (req, res) => {
             // Load Alle Produkte
             const prodRows = parseCSV(path.join(dataDir, 'Alle Produkte.csv'));
 
+            // Load Q1 for Hersteller info
+            const q1Path = path.join(dataDir, 'Produkte-Q1.xlsx');
+            let q1Map = {};
+            let allHersteller = [];
+            if (fs.existsSync(q1Path)) {
+                const wb = XLSX.readFile(q1Path);
+                const ws = wb.Sheets[wb.SheetNames[0]];
+                XLSX.utils.sheet_to_json(ws, { defval: null }).forEach(r => {
+                    const sku = String(r['Artikelnummer'] || '').trim().toUpperCase();
+                    if (sku) q1Map[sku] = r;
+                });
+                const hSet = new Set();
+                Object.values(q1Map).forEach(r => { if (r['Hersteller']) hSet.add(String(r['Hersteller']).trim()); });
+                allHersteller = [...hSet].sort();
+            }
+
             // Load Bestellungen — collect SKUs with SW6 orders
             const skusWithOrders = new Set();
             const bestPath = path.join(dataDir, 'Bestellungen Jan7-Apr7.csv');
@@ -1352,7 +1415,8 @@ app.post('/api/empfehlungen/scrape/start', (req, res) => {
                 const vkNetto = r2(parseDeNum(r['VK_Netto']));
                 const mwst = parseDeNum(r['MwSt_Satz']);
                 const vkBrutto = (vkNetto !== null && mwst !== null) ? r2(vkNetto * (1 + mwst / 100)) : null;
-                const ekNetto = r2(parseDeNum(r['EK_Netto']));
+                const hersteller = determineHersteller(r, q1Map[skuUpper], allHersteller);
+                const ekNetto = r2(ekMitRabatt(parseDeNum(r['EK_Netto']), hersteller));
                 const name = r['Produktname'] || '';
                 const gtin = r['GTIN'] || '';
 
