@@ -321,54 +321,93 @@ function ProductCard({ p, isExpandedAll, onSavePrice }) {
                     </div>
 
                     {/* Rabatt- vs. Normalzeitraum */}
-                    {(p.rabattPeriode || p.normalPeriode) && (
-                        <div style={{ marginTop: '1.5rem', borderTop: '1px solid var(--border-color)', paddingTop: '1rem' }}>
-                            <h4 style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textTransform: 'uppercase', margin: 0, marginBottom: '0.75rem' }}>Rabatt- vs. Normalzeitraum (SW6, Jan–Apr)</h4>
-                            <table style={{ width: '100%', fontSize: '0.88rem', borderCollapse: 'collapse', borderRadius: '0.5rem', overflow: 'hidden', border: '1px solid var(--border-color)' }}>
-                                <thead>
-                                    <tr style={{ background: '#f8fafc' }}>
-                                        <th style={{ textAlign: 'left', padding: '0.45rem 0.9rem', borderBottom: '1px solid var(--border-color)', color: 'var(--text-muted)', fontWeight: 600, fontSize: '0.78rem' }}>Zeitraum</th>
-                                        <th style={{ textAlign: 'right', padding: '0.45rem 0.9rem', borderBottom: '1px solid var(--border-color)', color: 'var(--text-muted)', fontWeight: 600, fontSize: '0.78rem' }}>Menge</th>
-                                        <th style={{ textAlign: 'right', padding: '0.45rem 0.9rem', borderBottom: '1px solid var(--border-color)', color: 'var(--text-muted)', fontWeight: 600, fontSize: '0.78rem' }}>Umsatz Netto</th>
-                                        <th style={{ textAlign: 'right', padding: '0.45rem 0.9rem', borderBottom: '1px solid var(--border-color)', color: 'var(--text-muted)', fontWeight: 600, fontSize: '0.78rem' }}>Gewinn</th>
-                                        <th style={{ textAlign: 'right', padding: '0.45rem 0.9rem', borderBottom: '1px solid var(--border-color)', color: 'var(--text-muted)', fontWeight: 600, fontSize: '0.78rem' }}>Ø Preis/St.</th>
-                                        <th style={{ textAlign: 'right', padding: '0.45rem 0.9rem', borderBottom: '1px solid var(--border-color)', color: 'var(--text-muted)', fontWeight: 600, fontSize: '0.78rem' }}>Anteil Menge</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {[
-                                        { label: 'Rabattaktion', data: p.rabattPeriode, color: '#d97706', bg: '#fffbeb' },
-                                        { label: 'Normalpreis', data: p.normalPeriode, color: '#059669', bg: '#f0fdf4' },
-                                    ].map(({ label, data, color, bg }) => {
-                                        const totalMenge = (p.rabattPeriode?.menge || 0) + (p.normalPeriode?.menge || 0);
-                                        const anteil = (data && totalMenge > 0) ? (data.menge / totalMenge * 100) : null;
-                                        const avgPreis = (data && data.menge > 0) ? data.umsatzNetto / data.menge : null;
-                                        return (
-                                            <tr key={label} style={{ background: bg }}>
-                                                <td style={{ padding: '0.55rem 0.9rem', fontWeight: 700, color }}>{label}</td>
-                                                <td style={{ padding: '0.55rem 0.9rem', textAlign: 'right', fontWeight: 500 }}>{data ? fmt(data.menge, 0) : '-'}</td>
-                                                <td style={{ padding: '0.55rem 0.9rem', textAlign: 'right' }}>{data ? fmtEur(data.umsatzNetto) : '-'}</td>
-                                                <td style={{ padding: '0.55rem 0.9rem', textAlign: 'right', fontWeight: 700, color: data?.gewinn >= 0 ? '#10b981' : '#ef4444' }}>
-                                                    {data?.gewinn !== null && data?.gewinn !== undefined ? (data.gewinn >= 0 ? '+' : '') + fmt(data.gewinn) + ' €' : '-'}
+                    {(p.rabattPeriode || p.normalPeriode) && (() => {
+                        const RABATT_TAGE = 74;
+                        const NORMAL_TAGE = 16;
+                        const rd = p.rabattPeriode;
+                        const nd = p.normalPeriode;
+                        const thStyle = (highlight) => ({
+                            textAlign: 'right', padding: '0.45rem 0.7rem', borderBottom: '1px solid var(--border-color)',
+                            color: highlight ? '#4f46e5' : 'var(--text-muted)', fontWeight: 600, fontSize: '0.75rem',
+                            background: highlight ? '#eef2ff' : '#f8fafc',
+                        });
+                        const thLeft = { textAlign: 'left', padding: '0.45rem 0.7rem', borderBottom: '1px solid var(--border-color)', color: 'var(--text-muted)', fontWeight: 600, fontSize: '0.75rem', background: '#f8fafc' };
+                        const tdStyle = (align = 'right', extra = {}) => ({ padding: '0.5rem 0.7rem', textAlign: align, fontSize: '0.84rem', ...extra });
+                        const tdNorm = (extra = {}) => ({ padding: '0.5rem 0.7rem', textAlign: 'right', fontSize: '0.84rem', background: '#eef2ff', color: '#4f46e5', fontWeight: 600, ...extra });
+
+                        const diffMengePTag = rd && nd ? ((rd.menge / RABATT_TAGE) - (nd.menge / NORMAL_TAGE)) : null;
+                        const diffUmsatzPTag = rd && nd ? ((rd.umsatzNetto / RABATT_TAGE) - (nd.umsatzNetto / NORMAL_TAGE)) : null;
+                        const diffGewinnPTag = rd && nd ? ((rd.gewinn / RABATT_TAGE) - (nd.gewinn / NORMAL_TAGE)) : null;
+
+                        return (
+                            <div style={{ marginTop: '1.5rem', borderTop: '1px solid var(--border-color)', paddingTop: '1rem' }}>
+                                <h4 style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textTransform: 'uppercase', margin: 0, marginBottom: '0.75rem' }}>Rabatt- vs. Normalzeitraum (SW6, Jan–Apr)</h4>
+                                <table style={{ width: '100%', fontSize: '0.84rem', borderCollapse: 'collapse', borderRadius: '0.5rem', overflow: 'hidden', border: '1px solid var(--border-color)' }}>
+                                    <thead>
+                                        <tr>
+                                            <th style={thLeft}>Zeitraum</th>
+                                            <th style={{ ...thStyle(false), textAlign: 'right' }}>Tage</th>
+                                            <th style={thStyle(false)}>Menge ges.</th>
+                                            <th style={thStyle(true)}>Ø St./Tag</th>
+                                            <th style={thStyle(false)}>Umsatz ges.</th>
+                                            <th style={thStyle(true)}>Ø €/Tag</th>
+                                            <th style={thStyle(false)}>Gewinn ges.</th>
+                                            <th style={thStyle(true)}>Ø Gew./Tag</th>
+                                            <th style={thStyle(false)}>Ø Preis/St.</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {[
+                                            { label: 'Rabattaktion', data: rd, tage: RABATT_TAGE, color: '#d97706', bg: '#fffbeb' },
+                                            { label: 'Normalpreis', data: nd, tage: NORMAL_TAGE, color: '#059669', bg: '#f0fdf4' },
+                                        ].map(({ label, data, tage, color, bg }) => {
+                                            const avgPreis = data?.menge > 0 ? data.umsatzNetto / data.menge : null;
+                                            const mengePTag = data ? data.menge / tage : null;
+                                            const umsatzPTag = data ? data.umsatzNetto / tage : null;
+                                            const gewinnPTag = data ? data.gewinn / tage : null;
+                                            const gewinnColor = data?.gewinn >= 0 ? '#10b981' : '#ef4444';
+                                            return (
+                                                <tr key={label} style={{ background: bg }}>
+                                                    <td style={{ ...tdStyle('left'), fontWeight: 700, color }}>{label}</td>
+                                                    <td style={tdStyle('right', { color: 'var(--text-muted)' })}>{tage}</td>
+                                                    <td style={tdStyle()}>{data ? fmt(data.menge, 0) : '-'}</td>
+                                                    <td style={tdNorm()}>{mengePTag !== null ? fmt(mengePTag, 1) : '-'}</td>
+                                                    <td style={tdStyle()}>{data ? fmtEur(data.umsatzNetto) : '-'}</td>
+                                                    <td style={tdNorm()}>{umsatzPTag !== null ? fmtEur(umsatzPTag) : '-'}</td>
+                                                    <td style={{ ...tdStyle(), fontWeight: 700, color: gewinnColor }}>
+                                                        {data?.gewinn !== null && data?.gewinn !== undefined ? (data.gewinn >= 0 ? '+' : '') + fmt(data.gewinn) + ' €' : '-'}
+                                                    </td>
+                                                    <td style={tdNorm({ color: gewinnPTag !== null ? (gewinnPTag >= 0 ? '#4338ca' : '#ef4444') : '#4f46e5' })}>
+                                                        {gewinnPTag !== null ? (gewinnPTag >= 0 ? '+' : '') + fmtEur(gewinnPTag) : '-'}
+                                                    </td>
+                                                    <td style={tdStyle('right', { color: 'var(--text-muted)' })}>{avgPreis !== null ? fmtEur(avgPreis) : '-'}</td>
+                                                </tr>
+                                            );
+                                        })}
+                                        {rd && nd && (
+                                            <tr style={{ background: '#f1f5f9', borderTop: '2px solid var(--border-color)' }}>
+                                                <td style={{ ...tdStyle('left'), fontWeight: 700, color: 'var(--text-muted)', fontSize: '0.78rem' }}>Δ Rabatt vs. Normal</td>
+                                                <td style={tdStyle('right', { color: 'var(--text-muted)' })}></td>
+                                                <td style={tdStyle()}></td>
+                                                <td style={{ ...tdNorm(), color: diffMengePTag >= 0 ? '#4338ca' : '#ef4444' }}>
+                                                    {diffMengePTag !== null ? (diffMengePTag >= 0 ? '+' : '') + fmt(diffMengePTag, 1) : '-'}
                                                 </td>
-                                                <td style={{ padding: '0.55rem 0.9rem', textAlign: 'right', color: 'var(--text-muted)' }}>{avgPreis !== null ? fmtEur(avgPreis) : '-'}</td>
-                                                <td style={{ padding: '0.55rem 0.9rem', textAlign: 'right' }}>
-                                                    {anteil !== null ? (
-                                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '0.5rem' }}>
-                                                            <div style={{ width: '60px', height: '6px', background: '#e5e7eb', borderRadius: '3px', overflow: 'hidden' }}>
-                                                                <div style={{ width: `${anteil}%`, height: '100%', background: color, borderRadius: '3px' }} />
-                                                            </div>
-                                                            <span style={{ color, fontWeight: 600, fontSize: '0.82rem', minWidth: '38px', textAlign: 'right' }}>{fmt(anteil, 0)}%</span>
-                                                        </div>
-                                                    ) : '-'}
+                                                <td style={tdStyle()}></td>
+                                                <td style={{ ...tdNorm(), color: diffUmsatzPTag >= 0 ? '#4338ca' : '#ef4444' }}>
+                                                    {diffUmsatzPTag !== null ? (diffUmsatzPTag >= 0 ? '+' : '') + fmtEur(diffUmsatzPTag) : '-'}
                                                 </td>
+                                                <td style={tdStyle()}></td>
+                                                <td style={{ ...tdNorm(), color: diffGewinnPTag >= 0 ? '#4338ca' : '#ef4444' }}>
+                                                    {diffGewinnPTag !== null ? (diffGewinnPTag >= 0 ? '+' : '') + fmtEur(diffGewinnPTag) : '-'}
+                                                </td>
+                                                <td style={tdStyle()}></td>
                                             </tr>
-                                        );
-                                    })}
-                                </tbody>
-                            </table>
-                        </div>
-                    )}
+                                        )}
+                                    </tbody>
+                                </table>
+                            </div>
+                        );
+                    })()}
                 </div>
             )}
         </div>
