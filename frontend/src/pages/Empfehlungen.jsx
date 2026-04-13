@@ -152,17 +152,38 @@ const TIER_CONFIG = {
 };
 
 // ----------------------------------------------------------------------
-// Reusable Card mit Header + Collapse + Aktion
+// Reusable Card mit Header + Collapse + Sort + Aktion
 // ----------------------------------------------------------------------
-function TierCard({ tier, products, search, onSearch, children, extraBadge }) {
+function TierCard({ tier, products, search, defaultSort, sortAccessors, children, extraBadge }) {
     const cfg = TIER_CONFIG[tier];
     const [open, setOpen] = useState(true);
+    const [sort, setSort] = useState(defaultSort || { key: null, desc: true });
     const Icon = cfg.icon;
+
+    const handleSort = (key) => {
+        setSort(s => s.key === key ? { ...s, desc: !s.desc } : { key, desc: true });
+    };
+
+    const sorted = useMemo(() => {
+        if (!sort.key || !sortAccessors || !sortAccessors[sort.key]) return products;
+        const accessor = sortAccessors[sort.key];
+        const arr = [...products];
+        arr.sort((a, b) => {
+            const av = accessor(a);
+            const bv = accessor(b);
+            if (av === null || av === undefined || (typeof av === 'number' && isNaN(av))) return 1;
+            if (bv === null || bv === undefined || (typeof bv === 'number' && isNaN(bv))) return -1;
+            if (typeof av === 'string') return sort.desc ? bv.localeCompare(av) : av.localeCompare(bv);
+            return sort.desc ? bv - av : av - bv;
+        });
+        return arr;
+    }, [products, sort, sortAccessors]);
+
     const filtered = useMemo(() => {
         const q = (search || '').toLowerCase();
-        if (!q) return products;
-        return products.filter(p => (p.name || '').toLowerCase().includes(q) || (p.sku || '').toLowerCase().includes(q));
-    }, [products, search]);
+        if (!q) return sorted;
+        return sorted.filter(p => (p.name || '').toLowerCase().includes(q) || (p.sku || '').toLowerCase().includes(q));
+    }, [sorted, search]);
 
     return (
         <div style={{
@@ -203,7 +224,7 @@ function TierCard({ tier, products, search, onSearch, children, extraBadge }) {
                         <div style={{ padding: '1.5rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
                             Keine Produkte in dieser Kategorie.
                         </div>
-                    ) : children(filtered)}
+                    ) : children(filtered, sort, handleSort)}
                 </div>
             )}
         </div>
@@ -222,6 +243,30 @@ function Th({ children, align = 'right', width }) {
             background: '#f8fafc', borderBottom: '1px solid var(--border-color)',
             whiteSpace: 'nowrap', width,
         }}>{children}</th>
+    );
+}
+function SortTh({ children, sortKey, sort, onSort, align = 'right' }) {
+    const active = sort?.key === sortKey;
+    return (
+        <th
+            onClick={() => onSort(sortKey)}
+            style={{
+                textAlign: align, padding: '0.5rem 0.75rem',
+                fontSize: '0.72rem', textTransform: 'uppercase',
+                color: active ? '#4f46e5' : 'var(--text-muted)', fontWeight: 600,
+                background: active ? '#eef2ff' : '#f8fafc',
+                borderBottom: '1px solid var(--border-color)',
+                whiteSpace: 'nowrap', cursor: 'pointer', userSelect: 'none',
+            }}
+        >
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
+                {children}
+                {active
+                    ? (sort.desc ? <ChevronDown size={11} /> : <ChevronUp size={11} />)
+                    : <ChevronDown size={11} style={{ opacity: 0.25 }} />
+                }
+            </span>
+        </th>
     );
 }
 function Td({ children, align = 'right', color, weight, style }) {
@@ -493,21 +538,29 @@ export default function Empfehlungen() {
 
             {/* === TIER 1: Werbung abdrehen === */}
             <TierCard tier={1} products={tiers[1]} search={search}
+                defaultSort={{ key: 'werbeMonat', desc: true }}
+                sortAccessors={{
+                    name: p => p.name || '',
+                    m_real: p => p._c.m_real,
+                    m_ohne_werbung: p => p._c.m_ohne_werbung,
+                    werbeQ1: p => p._c.werbeQ1,
+                    werbeMonat: p => p._c.werbeMonat,
+                }}
                 extraBadge={tier1Save > 0 && (
                     <span style={{ fontSize: '0.78rem', fontWeight: 700, color: '#10b981', background: '#ecfdf5', padding: '0.18rem 0.6rem', borderRadius: '999px', border: '1px solid #86efac' }}>
                         Sparpotenzial: {fmtEur(tier1Save)} / Monat
                     </span>
                 )}>
-                {(filtered) => (
+                {(filtered, sort, onSort) => (
                     <div style={{ overflowX: 'auto' }}>
                         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                             <thead>
                                 <tr>
-                                    <Th align="left">Produkt</Th>
-                                    <Th>Reale Marge</Th>
-                                    <Th>Marge o. Werbung</Th>
-                                    <Th>Werbung Q1</Th>
-                                    <Th>Sparpot. /Mon</Th>
+                                    <SortTh align="left" sortKey="name" sort={sort} onSort={onSort}>Produkt</SortTh>
+                                    <SortTh sortKey="m_real" sort={sort} onSort={onSort}>Reale Marge</SortTh>
+                                    <SortTh sortKey="m_ohne_werbung" sort={sort} onSort={onSort}>Marge o. Werbung</SortTh>
+                                    <SortTh sortKey="werbeQ1" sort={sort} onSort={onSort}>Werbung Q1</SortTh>
+                                    <SortTh sortKey="werbeMonat" sort={sort} onSort={onSort}>Sparpot. /Mon</SortTh>
                                     <Th align="center">Aktion</Th>
                                 </tr>
                             </thead>
@@ -538,18 +591,27 @@ export default function Empfehlungen() {
             </TierCard>
 
             {/* === TIER 2: Auslistung prüfen === */}
-            <TierCard tier={2} products={tiers[2]} search={search}>
-                {(filtered) => (
+            <TierCard tier={2} products={tiers[2]} search={search}
+                defaultSort={{ key: 'm_real', desc: false }}
+                sortAccessors={{
+                    name: p => p.name || '',
+                    m_real: p => p._c.m_real,
+                    m_ohne_werbung: p => p._c.m_ohne_werbung,
+                    ek: p => p.ekNetto,
+                    vk: p => p.vkBrutto,
+                    menge: p => p.menge90d,
+                }}>
+                {(filtered, sort, onSort) => (
                     <div style={{ overflowX: 'auto' }}>
                         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                             <thead>
                                 <tr>
-                                    <Th align="left">Produkt</Th>
-                                    <Th>Marge real</Th>
-                                    <Th>Marge o. Werbung</Th>
-                                    <Th>EK</Th>
-                                    <Th>VK Brutto</Th>
-                                    <Th>Menge 90d</Th>
+                                    <SortTh align="left" sortKey="name" sort={sort} onSort={onSort}>Produkt</SortTh>
+                                    <SortTh sortKey="m_real" sort={sort} onSort={onSort}>Marge real</SortTh>
+                                    <SortTh sortKey="m_ohne_werbung" sort={sort} onSort={onSort}>Marge o. Werbung</SortTh>
+                                    <SortTh sortKey="ek" sort={sort} onSort={onSort}>EK</SortTh>
+                                    <SortTh sortKey="vk" sort={sort} onSort={onSort}>VK Brutto</SortTh>
+                                    <SortTh sortKey="menge" sort={sort} onSort={onSort}>Menge 90d</SortTh>
                                     <Th align="center">Aktion</Th>
                                 </tr>
                             </thead>
@@ -581,18 +643,27 @@ export default function Empfehlungen() {
             </TierCard>
 
             {/* === TIER 3: Aus Rabattaktion nehmen === */}
-            <TierCard tier={3} products={tiers[3]} search={search}>
-                {(filtered) => (
+            <TierCard tier={3} products={tiers[3]} search={search}
+                defaultSort={{ key: 'verlust', desc: false }}
+                sortAccessors={{
+                    name: p => p.name || '',
+                    margeNormal: p => p._c.margeNormal,
+                    margeRabatt: p => p._c.margeRabatt,
+                    gewinnStRab: p => p._c.gewinnRabattStueck,
+                    verlust: p => p._c.verlustRabatt,
+                    mengeRabatt: p => p._c.mengeRabatt,
+                }}>
+                {(filtered, sort, onSort) => (
                     <div style={{ overflowX: 'auto' }}>
                         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                             <thead>
                                 <tr>
-                                    <Th align="left">Produkt</Th>
-                                    <Th>Marge normal</Th>
-                                    <Th>Marge bei −10%</Th>
-                                    <Th>Gewinn/St. −10%</Th>
-                                    <Th>Verlust Rabattperiode</Th>
-                                    <Th>Menge Rabatt</Th>
+                                    <SortTh align="left" sortKey="name" sort={sort} onSort={onSort}>Produkt</SortTh>
+                                    <SortTh sortKey="margeNormal" sort={sort} onSort={onSort}>Marge normal</SortTh>
+                                    <SortTh sortKey="margeRabatt" sort={sort} onSort={onSort}>Marge bei −10%</SortTh>
+                                    <SortTh sortKey="gewinnStRab" sort={sort} onSort={onSort}>Gewinn/St. −10%</SortTh>
+                                    <SortTh sortKey="verlust" sort={sort} onSort={onSort}>Verlust Rabattperiode</SortTh>
+                                    <SortTh sortKey="mengeRabatt" sort={sort} onSort={onSort}>Menge Rabatt</SortTh>
                                     <Th align="center">Aktion</Th>
                                 </tr>
                             </thead>
@@ -624,19 +695,29 @@ export default function Empfehlungen() {
             </TierCard>
 
             {/* === TIER 4: Preis erhöhen === */}
-            <TierCard tier={4} products={tiers[4]} search={search}>
-                {(filtered) => (
+            <TierCard tier={4} products={tiers[4]} search={search}
+                defaultSort={{ key: 'priceIncreasePct', desc: false }}
+                sortAccessors={{
+                    name: p => p.name || '',
+                    vkAlt: p => p.vkBrutto,
+                    vkNeu: p => p._c.newVkBrutto,
+                    priceIncreasePct: p => p._c.priceIncreasePct,
+                    margeJetzt: p => p._c.margeRabatt,
+                    margeNeu: p => p._c.newMargeRabatt,
+                    rang: p => p.currentScrape?.hr_rank ?? 99,
+                }}>
+                {(filtered, sort, onSort) => (
                     <div style={{ overflowX: 'auto' }}>
                         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                             <thead>
                                 <tr>
-                                    <Th align="left">Produkt</Th>
-                                    <Th>Aktuell VK Brutto</Th>
-                                    <Th>Empf. VK Brutto</Th>
-                                    <Th>Δ Preis</Th>
-                                    <Th>Marge −10% jetzt</Th>
-                                    <Th>Marge −10% neu</Th>
-                                    <Th>Idealo Rang/Rang1</Th>
+                                    <SortTh align="left" sortKey="name" sort={sort} onSort={onSort}>Produkt</SortTh>
+                                    <SortTh sortKey="vkAlt" sort={sort} onSort={onSort}>Aktuell VK Brutto</SortTh>
+                                    <SortTh sortKey="vkNeu" sort={sort} onSort={onSort}>Empf. VK Brutto</SortTh>
+                                    <SortTh sortKey="priceIncreasePct" sort={sort} onSort={onSort}>Δ Preis</SortTh>
+                                    <SortTh sortKey="margeJetzt" sort={sort} onSort={onSort}>Marge −10% jetzt</SortTh>
+                                    <SortTh sortKey="margeNeu" sort={sort} onSort={onSort}>Marge −10% neu</SortTh>
+                                    <SortTh sortKey="rang" sort={sort} onSort={onSort}>Idealo Rang/Rang1</SortTh>
                                     <Th align="center">Aktion</Th>
                                 </tr>
                             </thead>
@@ -673,19 +754,29 @@ export default function Empfehlungen() {
             </TierCard>
 
             {/* === TIER 5: Preis senken === */}
-            <TierCard tier={5} products={tiers[5]} search={search}>
-                {(filtered) => (
+            <TierCard tier={5} products={tiers[5]} search={search}
+                defaultSort={{ key: 'margeNeu', desc: true }}
+                sortAccessors={{
+                    name: p => p.name || '',
+                    vkAlt: p => p.vkBrutto,
+                    vkNeu: p => p._c.newVkBrutto,
+                    diffPct: p => p.vkBrutto > 0 ? ((p._c.newVkBrutto - p.vkBrutto) / p.vkBrutto) * 100 : 0,
+                    margeJetzt: p => p._c.margeRabatt,
+                    margeNeu: p => p._c.newMargeRabatt,
+                    rang: p => p.currentScrape?.hr_rank ?? 99,
+                }}>
+                {(filtered, sort, onSort) => (
                     <div style={{ overflowX: 'auto' }}>
                         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                             <thead>
                                 <tr>
-                                    <Th align="left">Produkt</Th>
-                                    <Th>Aktuell VK Brutto</Th>
-                                    <Th>Empf. VK Brutto</Th>
-                                    <Th>Δ Preis</Th>
-                                    <Th>Marge −10% jetzt</Th>
-                                    <Th>Marge −10% neu</Th>
-                                    <Th>Rang/Rang1</Th>
+                                    <SortTh align="left" sortKey="name" sort={sort} onSort={onSort}>Produkt</SortTh>
+                                    <SortTh sortKey="vkAlt" sort={sort} onSort={onSort}>Aktuell VK Brutto</SortTh>
+                                    <SortTh sortKey="vkNeu" sort={sort} onSort={onSort}>Empf. VK Brutto</SortTh>
+                                    <SortTh sortKey="diffPct" sort={sort} onSort={onSort}>Δ Preis</SortTh>
+                                    <SortTh sortKey="margeJetzt" sort={sort} onSort={onSort}>Marge −10% jetzt</SortTh>
+                                    <SortTh sortKey="margeNeu" sort={sort} onSort={onSort}>Marge −10% neu</SortTh>
+                                    <SortTh sortKey="rang" sort={sort} onSort={onSort}>Rang/Rang1</SortTh>
                                     <Th align="center">Aktion</Th>
                                 </tr>
                             </thead>
@@ -723,18 +814,27 @@ export default function Empfehlungen() {
             </TierCard>
 
             {/* === TIER 6: Preis hochtesten === */}
-            <TierCard tier={6} products={tiers[6]} search={search}>
-                {(filtered) => (
+            <TierCard tier={6} products={tiers[6]} search={search}
+                defaultSort={{ key: 'margeNeu', desc: true }}
+                sortAccessors={{
+                    name: p => p.name || '',
+                    vkAlt: p => p.vkBrutto,
+                    vkNeu: p => p._c.newVkBrutto,
+                    rank2: p => p._c.rank2,
+                    margeJetzt: p => p._c.margeRabatt,
+                    margeNeu: p => p._c.newMargeRabatt,
+                }}>
+                {(filtered, sort, onSort) => (
                     <div style={{ overflowX: 'auto' }}>
                         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                             <thead>
                                 <tr>
-                                    <Th align="left">Produkt</Th>
-                                    <Th>Aktuell VK Brutto</Th>
-                                    <Th>Empf. VK Brutto</Th>
-                                    <Th>Rang2-Preis</Th>
-                                    <Th>Marge −10% jetzt</Th>
-                                    <Th>Marge −10% neu</Th>
+                                    <SortTh align="left" sortKey="name" sort={sort} onSort={onSort}>Produkt</SortTh>
+                                    <SortTh sortKey="vkAlt" sort={sort} onSort={onSort}>Aktuell VK Brutto</SortTh>
+                                    <SortTh sortKey="vkNeu" sort={sort} onSort={onSort}>Empf. VK Brutto</SortTh>
+                                    <SortTh sortKey="rank2" sort={sort} onSort={onSort}>Rang2-Preis</SortTh>
+                                    <SortTh sortKey="margeJetzt" sort={sort} onSort={onSort}>Marge −10% jetzt</SortTh>
+                                    <SortTh sortKey="margeNeu" sort={sort} onSort={onSort}>Marge −10% neu</SortTh>
                                     <Th align="center">Aktion</Th>
                                 </tr>
                             </thead>
