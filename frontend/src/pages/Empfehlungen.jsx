@@ -62,8 +62,9 @@ function classify(p) {
     }
 
     // Tier 2 (NEU): Preisgestaltung überarbeiten
-    // Strukturell negativ UND Umsatz kommt fast ausschließlich aus Rabattaktionen
-    if (m_real !== null && m_real < 0 && isRabattDependent) {
+    // Strukturell negativ UND rabattabhängig UND mit max. ~15% Preisanpassung behebbar
+    // (m_real > -15%: benötigte Preiserhöhung ≈ |m_real|%, darüber ist Auslistung sinnvoller)
+    if (m_real !== null && m_real < 0 && m_real > -15 && isRabattDependent) {
         const gesamtMenge = rabattMenge + normalMenge;
         return {
             tier: 2,
@@ -74,8 +75,9 @@ function classify(p) {
         };
     }
 
-    // Tier 3: Werbung abdrehen (verfeinert: Verlust > 5% des Umsatzes = m_real < -5)
-    if (m_real !== null && m_real < -5 && has_ads) {
+    // Tier 3: Werbung abdrehen — Verlust > 5% UND ohne Werbung wieder gesund (> -5%)
+    // Wenn m_ohne_werbung ≤ -5%: strukturelles Problem → Tier 4, nicht Tier 3
+    if (m_real !== null && m_real < -5 && has_ads && m_ohne_werbung !== null && m_ohne_werbung > -5) {
         return {
             tier: 3,
             m_real, m_ohne_werbung,
@@ -84,8 +86,8 @@ function classify(p) {
         };
     }
 
-    // Tier 4: Auslistung prüfen (auch ohne Werbung stark negativ)
-    if (m_ohne_werbung !== null && m_ohne_werbung < -5 && !has_ads) {
+    // Tier 4: Auslistung prüfen — strukturell negativ auch ohne Werbung (mit oder ohne Ads)
+    if (m_ohne_werbung !== null && m_ohne_werbung < -5) {
         return { tier: 4, m_real, m_ohne_werbung };
     }
 
@@ -109,7 +111,7 @@ function classify(p) {
     // Tier 5: Aus Rabattaktion nehmen — normal profitabel, im Rabatt Verlust
     // Prüft sowohl Per-Unit-Schätzung ALS AUCH tatsächliches Quartalsergebnis (verhindert
     // Fehlklassifizierung wenn Werbekosten ungleich auf Perioden verteilt sind)
-    if (margeNormal >= 5 && gewinnRabatt < 0 && (p.rabattPeriode?.gewinn || 0) < 0 && !p.dauertiefpreis) {
+    if (margeNormal >= 5 && gewinnRabatt < 0 && (p.rabattPeriode?.gewinn || 0) < -5 && !p.dauertiefpreis) {
         return {
             tier: 5,
             margeNormal, margeRabatt,
