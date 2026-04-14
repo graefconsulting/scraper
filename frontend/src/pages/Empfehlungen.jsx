@@ -259,7 +259,7 @@ const TIER_CONFIG = {
 // ----------------------------------------------------------------------
 function TierCard({ tier, products, search, defaultSort, sortAccessors, children, extraBadges }) {
     const cfg = TIER_CONFIG[tier];
-    const [open, setOpen] = useState(true);
+    const [open, setOpen] = useState(false);
     const [sort, setSort] = useState(defaultSort || { key: null, desc: true });
     const Icon = cfg.icon;
 
@@ -1335,9 +1335,11 @@ export default function Empfehlungen() {
                     umsatz: p => p.umsatzNetto90d,
                 }}
                 extraBadges={<>
-                    <StatBadge color="#6b7280" border="#d1d5db" bg="#f9fafb">
-                        {tiers[9].length} Produkte
-                    </StatBadge>
+                    {tierStats[9]?.umsatz > 0 && (
+                        <StatBadge color="#6b7280" border="#d1d5db" bg="#f9fafb">
+                            Umsatz: {fmtEur(tierStats[9].umsatz)}
+                        </StatBadge>
+                    )}
                     {tierStats[9]?.verlust > 0 && (
                         <StatBadge color="#6b7280" border="#d1d5db" bg="#f9fafb">
                             Gesamtverlust: {fmtEur(tierStats[9].verlust)}/Quartal
