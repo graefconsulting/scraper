@@ -104,7 +104,11 @@ function classify(p) {
     if (m_ohne_werbung !== null && m_ohne_werbung < -5) {
         if (absoluteVerlust < MONITORING_THRESHOLD)
             return { tier: 9, originalTier: 4, absoluteVerlust, m_real, m_ohne_werbung };
-        return { tier: 4, m_real, m_ohne_werbung };
+        const werbeMonat = (p.werbekosten || 0) / 3;
+        const betriebsSt = p.betriebskostenStueck != null ? p.betriebskostenStueck : (p.vkNetto ? p.vkNetto * 0.13 : 0);
+        const betriebsMonat = betriebsSt * (p.menge90d || 0) / 3;
+        const verlustMonat = absoluteVerlust / 3;
+        return { tier: 4, m_real, m_ohne_werbung, werbeMonat, betriebsMonat, verlustMonat };
     }
 
     // Bei fehlenden Basisdaten → keine weitere Klassifizierung
@@ -612,6 +616,10 @@ export default function Empfehlungen() {
         stats[2].verlustRabatt = (tiers[2] || []).reduce((s, p) => s + Math.abs(p._c.verlustRabatt || 0), 0);
         // Tier 3: Einsparpotenzial Werbekosten/Monat
         stats[3].einsparpot = (tiers[3] || []).reduce((s, p) => s + (p._c.werbeMonat || 0), 0);
+        // Tier 4: Monatliche Einsparpotenziale bei Auslistung
+        stats[4].verlustMonat = (tiers[4] || []).reduce((s, p) => s + (p._c.verlustMonat || 0), 0);
+        stats[4].werbeMonat = (tiers[4] || []).reduce((s, p) => s + (p._c.werbeMonat || 0), 0);
+        stats[4].betriebsMonat = (tiers[4] || []).reduce((s, p) => s + (p._c.betriebsMonat || 0), 0);
         // Tier 5: Verlust im Rabattzeitraum
         stats[5].verlustRabatt = (tiers[5] || []).reduce((s, p) => s + Math.abs(p._c.verlustRabatt || 0), 0);
         // Tier 9: Monitoring — summierter Gesamtverlust
@@ -685,6 +693,90 @@ export default function Empfehlungen() {
                     <div style={{ fontSize: '0.68rem', color: '#10b981', fontWeight: 600, marginTop: '0.2rem' }}>Healthy</div>
                 </div>
             </div>
+
+            {/* === Gesamtpotenzial-Karte === */}
+            {(() => {
+                const einsparT1 = tierStats[1]?.einsparpot || 0;
+                const einsparT3 = tierStats[3]?.einsparpot || 0;
+                const einsparT4 = tierStats[4]?.verlustMonat || 0;
+                const totalEinspar = einsparT1 + einsparT3 + einsparT4;
+                const rabattT2mon = (tierStats[2]?.verlustRabatt || 0) / 3;
+                const rabattT5mon = (tierStats[5]?.verlustRabatt || 0) / 3;
+                const totalRabatt = rabattT2mon + rabattT5mon;
+                const totalRabattTag = totalRabatt / 30;
+                if (totalEinspar === 0 && totalRabatt === 0) return null;
+                return (
+                    <div style={{
+                        background: 'white', border: '1.5px solid #e2e8f0',
+                        borderRadius: '12px', overflow: 'hidden',
+                    }}>
+                        <div style={{ padding: '0.7rem 1.1rem', background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
+                            <h3 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 700, color: '#1e293b' }}>
+                                Gesamtpotenzial — wenn alle Empfehlungen umgesetzt werden
+                            </h3>
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0 }}>
+                            {/* Linke Seite: Monatliche Einsparungen */}
+                            <div style={{ padding: '1rem 1.25rem', borderRight: '1px solid #e2e8f0' }}>
+                                <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', marginBottom: '0.65rem', letterSpacing: '0.05em' }}>
+                                    Monatliche Kosteneinsparungen
+                                </div>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                                    {einsparT1 > 0 && (
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.84rem' }}>
+                                            <span style={{ color: '#d97706' }}>Tier 1 · ACoS halbieren</span>
+                                            <span style={{ fontWeight: 700, color: '#d97706' }}>{fmtEur(einsparT1)}/Mon</span>
+                                        </div>
+                                    )}
+                                    {einsparT3 > 0 && (
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.84rem' }}>
+                                            <span style={{ color: '#dc2626' }}>Tier 3 · Werbung abdrehen</span>
+                                            <span style={{ fontWeight: 700, color: '#dc2626' }}>{fmtEur(einsparT3)}/Mon</span>
+                                        </div>
+                                    )}
+                                    {einsparT4 > 0 && (
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.84rem' }}>
+                                            <span style={{ color: '#7c2d12' }}>Tier 4 · Auslistungen</span>
+                                            <span style={{ fontWeight: 700, color: '#7c2d12' }}>{fmtEur(einsparT4)}/Mon</span>
+                                        </div>
+                                    )}
+                                    <div style={{ borderTop: '1.5px solid #e2e8f0', marginTop: '0.3rem', paddingTop: '0.4rem', display: 'flex', justifyContent: 'space-between' }}>
+                                        <span style={{ fontSize: '0.9rem', fontWeight: 700, color: '#10b981' }}>Gesamt</span>
+                                        <span style={{ fontSize: '1.1rem', fontWeight: 800, color: '#10b981' }}>{fmtEur(totalEinspar)}/Mon</span>
+                                    </div>
+                                </div>
+                            </div>
+                            {/* Rechte Seite: Laufende Rabattverluste */}
+                            <div style={{ padding: '1rem 1.25rem' }}>
+                                <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', marginBottom: '0.65rem', letterSpacing: '0.05em' }}>
+                                    Laufende Verluste in Rabattperioden
+                                </div>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                                    {rabattT2mon > 0 && (
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.84rem' }}>
+                                            <span style={{ color: '#7c3aed' }}>Tier 2 · Preisgestaltung</span>
+                                            <span style={{ fontWeight: 700, color: '#7c3aed' }}>{fmtEur(rabattT2mon)}/Mon</span>
+                                        </div>
+                                    )}
+                                    {rabattT5mon > 0 && (
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.84rem' }}>
+                                            <span style={{ color: '#a16207' }}>Tier 5 · Rabattaktionen</span>
+                                            <span style={{ fontWeight: 700, color: '#a16207' }}>{fmtEur(rabattT5mon)}/Mon</span>
+                                        </div>
+                                    )}
+                                    <div style={{ borderTop: '1.5px solid #e2e8f0', marginTop: '0.3rem', paddingTop: '0.4rem', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '1rem' }}>
+                                        <span style={{ fontSize: '0.9rem', fontWeight: 700, color: '#ef4444' }}>Gesamt</span>
+                                        <div style={{ textAlign: 'right' }}>
+                                            <span style={{ fontSize: '1.1rem', fontWeight: 800, color: '#ef4444' }}>{fmtEur(totalRabatt)}/Mon</span>
+                                            <span style={{ fontSize: '0.75rem', color: '#94a3b8', marginLeft: '0.5rem' }}>({fmtEur(totalRabattTag)}/Tag)</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                );
+            })()}
 
             {/* === TIER 1: Werbeausgaben optimieren === */}
             <TierCard tier={1} products={tiers[1]} search={search}
@@ -772,7 +864,7 @@ export default function Empfehlungen() {
                     )}
                     {tierStats[2]?.verlustRabatt > 0 && (
                         <StatBadge color="#ef4444" border="#fca5a5" bg="#fef2f2">
-                            Verlust Rabattperiode: {fmtEur(tierStats[2].verlustRabatt)}
+                            Verlust Rabattperioden (90d): {fmtEur(tierStats[2].verlustRabatt)}
                         </StatBadge>
                     )}
                 </>}>
@@ -786,7 +878,7 @@ export default function Empfehlungen() {
                                     <SortTh sortKey="m_real" sort={sort} onSort={onSort}>Reale Marge</SortTh>
                                     <SortTh sortKey="m_ohne" sort={sort} onSort={onSort}>Marge o. Werbung</SortTh>
                                     <SortTh sortKey="rabattAnteil" sort={sort} onSort={onSort}>% Verkäufe im Rabatt</SortTh>
-                                    <SortTh sortKey="verlustRabatt" sort={sort} onSort={onSort}>Verlust Rabattperiode</SortTh>
+                                    <SortTh sortKey="verlustRabatt" sort={sort} onSort={onSort}>Verlust Rabattperiode (90d)</SortTh>
                                     <SortTh sortKey="rabattMenge" sort={sort} onSort={onSort}>Menge Rabatt/Normal</SortTh>
                                     <Th align="center">Aktion</Th>
                                 </tr>
@@ -889,21 +981,36 @@ export default function Empfehlungen() {
 
             {/* === TIER 4: Auslistung prüfen === */}
             <TierCard tier={4} products={tiers[4]} search={search}
-                defaultSort={{ key: 'm_real', desc: false }}
+                defaultSort={{ key: 'verlustMonat', desc: false }}
                 sortAccessors={{
                     name: p => p.name || '',
                     m_real: p => p._c.m_real,
                     m_ohne_werbung: p => p._c.m_ohne_werbung,
+                    verlustMonat: p => p._c.verlustMonat,
+                    werbeMonat: p => p._c.werbeMonat,
+                    betriebsMonat: p => p._c.betriebsMonat,
                     ek: p => p.ekNetto,
                     vk: p => p.vkBrutto,
                     menge: p => p.menge90d,
                     umsatz: p => p.umsatzNetto90d,
                 }}
-                extraBadges={tierStats[4]?.umsatz > 0 && (
-                    <StatBadge color="#7c2d12" border="#fdba74" bg="#fff7ed">
-                        Umsatz: {fmtEur(tierStats[4].umsatz)}
-                    </StatBadge>
-                )}>
+                extraBadges={<>
+                    {tierStats[4]?.umsatz > 0 && (
+                        <StatBadge color="#7c2d12" border="#fdba74" bg="#fff7ed">
+                            Umsatz: {fmtEur(tierStats[4].umsatz)}
+                        </StatBadge>
+                    )}
+                    {tierStats[4]?.verlustMonat > 0 && (
+                        <StatBadge color="#ef4444" border="#fca5a5" bg="#fef2f2">
+                            Einsparpot.: {fmtEur(tierStats[4].verlustMonat)}/Mon
+                        </StatBadge>
+                    )}
+                    {tierStats[4]?.werbeMonat > 0 && (
+                        <StatBadge color="#d97706" border="#fcd34d" bg="#fffbeb">
+                            davon Werbung: {fmtEur(tierStats[4].werbeMonat)}/Mon
+                        </StatBadge>
+                    )}
+                </>}>
                 {(filtered, sort, onSort) => (
                     <div style={{ overflowX: 'auto' }}>
                         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -913,6 +1020,9 @@ export default function Empfehlungen() {
                                     <SortTh sortKey="umsatz" sort={sort} onSort={onSort}>Umsatz 90d</SortTh>
                                     <SortTh sortKey="m_real" sort={sort} onSort={onSort}>Marge real</SortTh>
                                     <SortTh sortKey="m_ohne_werbung" sort={sort} onSort={onSort}>Marge o. Werbung</SortTh>
+                                    <SortTh sortKey="verlustMonat" sort={sort} onSort={onSort}>Verlust/Mon</SortTh>
+                                    <SortTh sortKey="werbeMonat" sort={sort} onSort={onSort}>Werbung/Mon</SortTh>
+                                    <SortTh sortKey="betriebsMonat" sort={sort} onSort={onSort}>Betrieb/Mon</SortTh>
                                     <SortTh sortKey="ek" sort={sort} onSort={onSort}>EK</SortTh>
                                     <SortTh sortKey="vk" sort={sort} onSort={onSort}>VK Brutto</SortTh>
                                     <SortTh sortKey="menge" sort={sort} onSort={onSort}>Menge 90d</SortTh>
@@ -930,6 +1040,9 @@ export default function Empfehlungen() {
                                                 <Td color="var(--text-muted)">{fmtEur(p.umsatzNetto90d)}</Td>
                                                 <Td color="#ef4444" weight={700}>{fmtPct(c.m_real)}</Td>
                                                 <Td color="#ef4444" weight={600}>{fmtPct(c.m_ohne_werbung)}</Td>
+                                                <Td color="#ef4444" weight={700}>{fmtEur(c.verlustMonat)}</Td>
+                                                <Td color="#d97706">{fmtEur(c.werbeMonat)}</Td>
+                                                <Td color="var(--text-muted)">{fmtEur(c.betriebsMonat)}</Td>
                                                 <Td>{fmtEur(p.ekNetto)}</Td>
                                                 <Td>{fmtEur(p.vkBrutto)}</Td>
                                                 <Td color="var(--text-muted)">{fmt(p.menge90d, 0)}</Td>
@@ -937,7 +1050,7 @@ export default function Empfehlungen() {
                                                     <ActionButton active={!!delisted[p.sku]} onClick={() => toggleDelist(p)} label="Auslisten" color="#7c2d12" />
                                                 </Td>
                                             </tr>
-                                            {exp && <ExpandedRow p={p} c={c} colSpan={8} onSavePrice={savePriceFromCalculator} />}
+                                            {exp && <ExpandedRow p={p} c={c} colSpan={11} onSavePrice={savePriceFromCalculator} />}
                                         </React.Fragment>
                                     );
                                 })}
