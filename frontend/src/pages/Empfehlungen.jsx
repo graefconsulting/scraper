@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState, useMemo } from 'react';
 import axios from 'axios';
 import {
     Search, Megaphone, Trash2, Lock, ArrowUpCircle, ArrowDownCircle,
-    Sparkles, ChevronDown, ChevronUp, Check, AlertTriangle, Sliders, Tag,
+    Sparkles, ChevronDown, ChevronUp, Check, AlertTriangle, Sliders, Tag, Eye,
 } from 'lucide-react';
 import ProductDetail from '../components/ProductDetail';
 
@@ -22,8 +22,8 @@ const fmtPct = (v) => v === null || v === undefined || isNaN(v) ? '-' : fmt(v, 1
 const RABATT = 0.10;
 
 // ----------------------------------------------------------------------
-// Klassifikations-Logik (8 Tiers)
-// Tier 1 (NEU): Werbeausgaben optimieren  – operativ gesund, ACoS > 10%
+// Klassifikations-Logik (9 Tiers)
+// Tier 1 (NEU): Werbeausgaben optimieren  – operativ gesund, ACoS > 15%
 // Tier 2 (NEU): Preisgestaltung überarb.  – strukturell negativ + rabattabhängig
 // Tier 3 (ex-1): Werbung abdrehen         – Verlust > 5% UND Werbung aktiv
 // Tier 4 (ex-2): Auslistung prüfen        – auch ohne Werbung > –5% Verlust
@@ -31,7 +31,10 @@ const RABATT = 0.10;
 // Tier 6 (ex-4): Preis erhöhen            – Rabattmarge < 5%, heilbar
 // Tier 7 (ex-5): Preis senken             – Marge dick, nicht Rang 1
 // Tier 8 (ex-6): Preis hochtesten         – Rang 1 mit Luft
+// Tier 9 (NEU): Monitoring                – Verlust < 3 €/Quartal, kein Handlungsbedarf
 // ----------------------------------------------------------------------
+const MONITORING_THRESHOLD = 3; // €/Quartal
+
 function classify(p) {
     const m_real = p.realeMargeProz;
     const has_ads = (p.werbekosten || 0) > 0;
@@ -44,11 +47,17 @@ function classify(p) {
         ? rabattMenge > 0
         : rabattMenge > normalMenge * 5;
 
-    // Tier 1 (NEU): Werbeausgaben optimieren
+    // Absolutverlust in € über 90 Tage (für Monitoring-Schwelle)
+    const umsatz = p.umsatzNetto90d || 0;
+    const absoluteVerlust = (m_real !== null && m_real < 0) ? Math.abs(m_real / 100 * umsatz) : 0;
+
+    // Tier 1: Werbeausgaben optimieren
     // Produkt wäre ohne Werbung gesund (>10%), ACoS > 15% (normaler Bereich 10-12% ist ok),
     // Verlust > 2% des Umsatzes, UND Optimierung (ACoS halbieren) führt zu akzeptablem Ergebnis
     const projectedMarge = m_real + wkAnteil / 2;
     if (m_ohne_werbung !== null && m_ohne_werbung > 10 && wkAnteil > 15 && m_real < -2 && has_ads && projectedMarge > -5) {
+        if (absoluteVerlust < MONITORING_THRESHOLD)
+            return { tier: 9, originalTier: 1, absoluteVerlust, m_real, m_ohne_werbung };
         const targetAcos = wkAnteil / 2;
         const einsparMonat = (p.werbekosten || 0) / 3 / 2;
         return {
@@ -61,10 +70,13 @@ function classify(p) {
         };
     }
 
-    // Tier 2 (NEU): Preisgestaltung überarbeiten
-    // Strukturell negativ UND rabattabhängig UND mit max. ~15% Preisanpassung behebbar
-    // (m_real > -15%: benötigte Preiserhöhung ≈ |m_real|%, darüber ist Auslistung sinnvoller)
-    if (m_real !== null && m_real < 0 && m_real > -15 && isRabattDependent) {
+    // Tier 2: Preisgestaltung überarbeiten
+    // Strukturell negativ UND rabattabhängig UND Normalpreis nicht profitabel
+    // UND mit max. ~15% Preisanpassung behebbar (darüber → Auslistung sinnvoller)
+    // Produkte, die im Normalpreis Gewinn machen, fallen durch zu Tier 5
+    if (m_real !== null && m_real < 0 && m_real > -15 && isRabattDependent && (p.normalPeriode?.gewinn || 0) <= 0) {
+        if (absoluteVerlust < MONITORING_THRESHOLD)
+            return { tier: 9, originalTier: 2, absoluteVerlust, m_real, m_ohne_werbung };
         const gesamtMenge = rabattMenge + normalMenge;
         return {
             tier: 2,
@@ -78,6 +90,8 @@ function classify(p) {
     // Tier 3: Werbung abdrehen — Verlust > 5% UND ohne Werbung wieder gesund (> -5%)
     // Wenn m_ohne_werbung ≤ -5%: strukturelles Problem → Tier 4, nicht Tier 3
     if (m_real !== null && m_real < -5 && has_ads && m_ohne_werbung !== null && m_ohne_werbung > -5) {
+        if (absoluteVerlust < MONITORING_THRESHOLD)
+            return { tier: 9, originalTier: 3, absoluteVerlust, m_real, m_ohne_werbung };
         return {
             tier: 3,
             m_real, m_ohne_werbung,
@@ -88,6 +102,8 @@ function classify(p) {
 
     // Tier 4: Auslistung prüfen — strukturell negativ auch ohne Werbung (mit oder ohne Ads)
     if (m_ohne_werbung !== null && m_ohne_werbung < -5) {
+        if (absoluteVerlust < MONITORING_THRESHOLD)
+            return { tier: 9, originalTier: 4, absoluteVerlust, m_real, m_ohne_werbung };
         return { tier: 4, m_real, m_ohne_werbung };
     }
 
@@ -111,7 +127,11 @@ function classify(p) {
     // Tier 5: Aus Rabattaktion nehmen — normal profitabel, im Rabatt Verlust
     // Prüft sowohl Per-Unit-Schätzung ALS AUCH tatsächliches Quartalsergebnis (verhindert
     // Fehlklassifizierung wenn Werbekosten ungleich auf Perioden verteilt sind)
-    if (margeNormal >= 5 && gewinnRabatt < 0 && (p.rabattPeriode?.gewinn || 0) < -5 && !p.dauertiefpreis) {
+    // Monitoring-Schwelle basiert auf tatsächlichem rabattPeriode.gewinn (präziser)
+    const tier5AbsLoss = Math.abs(p.rabattPeriode?.gewinn || 0);
+    if (margeNormal >= 5 && gewinnRabatt < 0 && (p.rabattPeriode?.gewinn || 0) < 0 && !p.dauertiefpreis) {
+        if (tier5AbsLoss < MONITORING_THRESHOLD)
+            return { tier: 9, originalTier: 5, absoluteVerlust: tier5AbsLoss, m_real, m_ohne_werbung };
         return {
             tier: 5,
             margeNormal, margeRabatt,
@@ -207,6 +227,8 @@ function getTierExplanation(p, c) {
             return `Marge bei −10% Rabatt: ${fmtPct(c.margeRabatt)} — genug Spielraum für Preissenkung. Rang-1-Preis auf Idealo: ${fmtEur(c.rank1)}. Mit ${fmtEur(c.newVkBrutto)} Rang 1 erreichbar — Marge bleibt bei ${fmtPct(c.newMargeRabatt)}.`;
         case 8:
             return `Top-Performer auf Rang 1 mit ${fmtPct(c.margeRabatt)} Rabattmarge. Rang 2 liegt bei ${fmtEur(c.rank2)}. Preis auf ${fmtEur(c.newVkBrutto)} anheben — Rang 1 bleibt gesichert, Marge steigt auf ${fmtPct(c.newMargeRabatt)}.`;
+        case 9:
+            return `Verlust unter ${MONITORING_THRESHOLD} €/Quartal (${fmtEur(c.absoluteVerlust)}) — zu gering für aktiven Handlungsbedarf. Ursprüngliche Kategorie: ${TIER_CONFIG[c.originalTier]?.title || `Tier ${c.originalTier}`}.`;
         default:
             return null;
     }
@@ -224,6 +246,7 @@ const TIER_CONFIG = {
     6: { icon: ArrowUpCircle,  title: 'Preis erhöhen (Rabatt-Puffer)', color: '#0369a1', bg: '#f0f9ff', border: '#7dd3fc', subtitle: 'Rabattmarge < 5% — Normalpreis anheben, damit auch bei −10% noch Substanz bleibt.' },
     7: { icon: ArrowDownCircle,title: 'Preis senken (Rang 1 holen)',   color: '#15803d', bg: '#f0fdf4', border: '#86efac', subtitle: 'Marge ≥ 10% bei −10%, nicht Rang 1 — Idealo-Position holen, ohne Verlust zu riskieren.' },
     8: { icon: Sparkles,       title: 'Preis hochtesten',              color: '#7e22ce', bg: '#faf5ff', border: '#d8b4fe', subtitle: 'Top-Performer auf Rang 1 mit Luft nach oben — Preis dicht an Rang 2 setzen.' },
+    9: { icon: Eye,            title: 'Monitoring',                    color: '#6b7280', bg: '#f9fafb', border: '#d1d5db', subtitle: 'Verlust unter 3 €/Quartal — kein Handlungsbedarf, wird beobachtet.' },
 };
 
 // ----------------------------------------------------------------------
@@ -565,7 +588,7 @@ export default function Empfehlungen() {
 
     // Klassifizierung
     const tiers = useMemo(() => {
-        const t = { 1: [], 2: [], 3: [], 4: [], 5: [], 6: [], 7: [], 8: [], 0: [] };
+        const t = { 1: [], 2: [], 3: [], 4: [], 5: [], 6: [], 7: [], 8: [], 9: [], 0: [] };
         data.forEach(p => {
             if ((p.menge90d || 0) === 0) return;
             const c = classify(p);
@@ -577,7 +600,7 @@ export default function Empfehlungen() {
     // Tier-Statistiken: Umsatz + spezifische Kennzahlen
     const tierStats = useMemo(() => {
         const stats = {};
-        [1, 2, 3, 4, 5, 6, 7, 8].forEach(t => {
+        [1, 2, 3, 4, 5, 6, 7, 8, 9].forEach(t => {
             const ps = tiers[t] || [];
             stats[t] = {
                 umsatz: ps.reduce((s, p) => s + (p.umsatzNetto90d || 0), 0),
@@ -591,6 +614,8 @@ export default function Empfehlungen() {
         stats[3].einsparpot = (tiers[3] || []).reduce((s, p) => s + (p._c.werbeMonat || 0), 0);
         // Tier 5: Verlust im Rabattzeitraum
         stats[5].verlustRabatt = (tiers[5] || []).reduce((s, p) => s + Math.abs(p._c.verlustRabatt || 0), 0);
+        // Tier 9: Monitoring — summierter Gesamtverlust
+        stats[9].verlust = (tiers[9] || []).reduce((s, p) => s + (p._c.absoluteVerlust || 0), 0);
         return stats;
     }, [tiers]);
 
@@ -606,7 +631,7 @@ export default function Empfehlungen() {
                 <div>
                     <h1 style={{ fontSize: '1.4rem', fontWeight: 700, margin: 0 }}>Empfehlungen</h1>
                     <p style={{ color: 'var(--text-muted)', margin: '0.3rem 0 0', fontSize: '0.88rem' }}>
-                        8-Tier-Strategie für {activeCount} Produkte mit Umsatz · hierarchisch — jedes Produkt erscheint nur in der höchsten Kategorie
+                        9-Tier-Strategie für {activeCount} Produkte mit Umsatz · hierarchisch — jedes Produkt erscheint nur in der höchsten Kategorie
                     </p>
                 </div>
                 <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'center' }}>
@@ -630,7 +655,7 @@ export default function Empfehlungen() {
             </div>
 
             {/* Summary bar */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(9, 1fr)', gap: '0.5rem' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(10, 1fr)', gap: '0.5rem' }}>
                 {[1, 2, 3, 4, 5, 6, 7, 8].map(t => {
                     const cfg = TIER_CONFIG[t];
                     return (
@@ -645,6 +670,13 @@ export default function Empfehlungen() {
                         </div>
                     );
                 })}
+                <div style={{
+                    background: '#f9fafb', border: '1.5px solid #d1d5db', borderRadius: '8px',
+                    padding: '0.6rem 0.75rem', textAlign: 'center',
+                }}>
+                    <div style={{ fontSize: '1.55rem', fontWeight: 800, color: '#6b7280', lineHeight: 1 }}>{tiers[9].length}</div>
+                    <div style={{ fontSize: '0.68rem', color: '#6b7280', fontWeight: 600, marginTop: '0.2rem' }}>Monitoring</div>
+                </div>
                 <div style={{
                     background: '#ecfdf5', border: '1.5px solid #6ee7b7', borderRadius: '8px',
                     padding: '0.6rem 0.75rem', textAlign: 'center',
@@ -1169,6 +1201,76 @@ export default function Empfehlungen() {
                                                 </Td>
                                             </tr>
                                             {exp && <ExpandedRow p={p} c={c} colSpan={8} onSavePrice={savePriceFromCalculator} />}
+                                        </React.Fragment>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
+            </TierCard>
+
+            {/* === TIER 9: Monitoring === */}
+            <TierCard tier={9} products={tiers[9]} search={search}
+                defaultSort={{ key: 'verlust', desc: false }}
+                sortAccessors={{
+                    name: p => p.name || '',
+                    originalTier: p => p._c.originalTier,
+                    m_real: p => p._c.m_real,
+                    verlust: p => p._c.absoluteVerlust,
+                    umsatz: p => p.umsatzNetto90d,
+                }}
+                extraBadges={<>
+                    <StatBadge color="#6b7280" border="#d1d5db" bg="#f9fafb">
+                        {tiers[9].length} Produkte
+                    </StatBadge>
+                    {tierStats[9]?.verlust > 0 && (
+                        <StatBadge color="#6b7280" border="#d1d5db" bg="#f9fafb">
+                            Gesamtverlust: {fmtEur(tierStats[9].verlust)}/Quartal
+                        </StatBadge>
+                    )}
+                </>}>
+                {(filtered, sort, onSort) => (
+                    <div style={{ overflowX: 'auto' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                            <thead>
+                                <tr>
+                                    <SortTh align="left" sortKey="name" sort={sort} onSort={onSort}>Produkt</SortTh>
+                                    <SortTh sortKey="umsatz" sort={sort} onSort={onSort}>Umsatz 90d</SortTh>
+                                    <SortTh sortKey="m_real" sort={sort} onSort={onSort}>Reale Marge</SortTh>
+                                    <SortTh sortKey="verlust" sort={sort} onSort={onSort}>Verlust/Quartal</SortTh>
+                                    <SortTh sortKey="originalTier" sort={sort} onSort={onSort}>Urspr. Kategorie</SortTh>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {filtered.map(p => {
+                                    const c = p._c;
+                                    const exp = !!expandedSkus[p.sku];
+                                    const origCfg = TIER_CONFIG[c.originalTier];
+                                    return (
+                                        <React.Fragment key={p.sku}>
+                                            <tr>
+                                                <ProductCell p={p} isExpanded={exp} onToggle={() => toggleExpand(p.sku)} />
+                                                <Td color="var(--text-muted)">{fmtEur(p.umsatzNetto90d)}</Td>
+                                                <Td color={c.m_real < 0 ? '#ef4444' : '#10b981'} weight={600}>{fmtPct(c.m_real)}</Td>
+                                                <Td color="#6b7280" weight={600}>{fmtEur(c.absoluteVerlust)}</Td>
+                                                <Td align="left">
+                                                    {origCfg && (
+                                                        <span style={{
+                                                            fontSize: '0.72rem', fontWeight: 600,
+                                                            color: origCfg.color,
+                                                            background: origCfg.bg,
+                                                            border: `1px solid ${origCfg.border}`,
+                                                            padding: '0.1rem 0.45rem',
+                                                            borderRadius: '999px',
+                                                            whiteSpace: 'nowrap',
+                                                        }}>
+                                                            T{c.originalTier} · {origCfg.title}
+                                                        </span>
+                                                    )}
+                                                </Td>
+                                            </tr>
+                                            {exp && <ExpandedRow p={p} c={c} colSpan={5} onSavePrice={savePriceFromCalculator} />}
                                         </React.Fragment>
                                     );
                                 })}
