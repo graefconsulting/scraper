@@ -152,7 +152,8 @@ function classify(p) {
     const isRank1 = s?.hr_rank === 1;
 
     // Tier 6: Preis erhöhen — Rabattmarge zu dünn, aber heilbar
-    if (margeRabatt !== null && margeRabatt < 5 && margeRabatt >= -10 && !p.dauertiefpreis) {
+    // Nur wenn reale Gesamtmarge negativ: Produkte mit positivem m_real sind insgesamt profitabel → Tier 0
+    if (margeRabatt !== null && margeRabatt < 5 && margeRabatt >= -10 && !p.dauertiefpreis && m_real < 0) {
         const requiredVkN = costs / (0.9 * 0.95);
         const requiredVkBrutto = requiredVkN * mwstFactor;
         const priceIncreasePct = vkN > 0 ? ((requiredVkN - vkN) / vkN) * 100 : 0;
