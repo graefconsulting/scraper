@@ -1217,6 +1217,22 @@ app.post('/api/auswertung/scrape/start', (req, res) => {
                 toScrape.push({ sku: csv['Artikelnummer'], link });
             }
 
+            // Also include products with idealo_link in DB not covered by XLSX sources
+            const xlsxSkus = new Set(toScrape.map(p => p.sku.toUpperCase()));
+            const dbLinks = await new Promise((resolve, reject) => {
+                db.all(
+                    `SELECT id AS sku, idealo_link AS link FROM products WHERE idealo_link IS NOT NULL AND idealo_link != ''`,
+                    [],
+                    (err, rows) => err ? reject(err) : resolve(rows)
+                );
+            });
+            for (const row of dbLinks) {
+                if (!xlsxSkus.has(row.sku.toUpperCase())) {
+                    toScrape.push({ sku: row.sku, link: row.link });
+                }
+            }
+            console.log(`DB-only links added: ${dbLinks.filter(r => !xlsxSkus.has(r.sku.toUpperCase())).length}`);
+
             auswertungScrapeState = { isRunning: true, total: toScrape.length, completed: 0, failed: [], completedIds: [] };
             console.log(`Auswertung scraping started for ${toScrape.length} products...`);
 
