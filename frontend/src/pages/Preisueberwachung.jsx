@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { Search, ChevronUp, ChevronDown, Minus, ExternalLink, Calculator } from 'lucide-react';
 import axios from 'axios';
+import * as XLSX from 'xlsx';
 
 class ErrorBoundary extends React.Component {
     constructor(props) {
@@ -56,7 +57,9 @@ const formatPct = (val) => new Intl.NumberFormat('de-DE', { minimumFractionDigit
 const formatEurPlain = (val) => new Intl.NumberFormat('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(val || 0);
 const formatPctPlain = (val) => new Intl.NumberFormat('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(val || 0);
 
-function ProductCard({ p, defaultCalcOpen, isExpandedAll }) {
+const LS_KEY = 'hr_saved_prices';
+
+function ProductCard({ p, defaultCalcOpen, isExpandedAll, onSavePrice }) {
     const is19 = p.tax_rate === 19;
     const [isCalcOpen, setIsCalcOpen] = useState(defaultCalcOpen || false);
     const [isExpanded, setIsExpanded] = useState(false);
@@ -96,7 +99,6 @@ function ProductCard({ p, defaultCalcOpen, isExpandedAll }) {
 
     let projDiffEur = null;
     let projDiffPct = null;
-    // same logic for lowestPrice as derived earlier
     const lowestRaw = p.currentScrape?.lowest_price;
     const lowestComp = Math.min(
         p.currentScrape?.rank1_price || 999999,
@@ -120,7 +122,6 @@ function ProductCard({ p, defaultCalcOpen, isExpandedAll }) {
 
     let projRank = "Keine Daten";
     if (allCompetitors.length > 0) {
-        // Filter out existing HR prices from the pure competition
         const competitorsOnly = allCompetitors.filter(c => {
             const shopName = c.shop || "";
             return !(shopName.toLowerCase().includes('health rise') || shopName.toLowerCase().includes('health-rise'));
@@ -139,7 +140,6 @@ function ProductCard({ p, defaultCalcOpen, isExpandedAll }) {
         }
         projRank = `Rang ${simulatedRank}`;
     } else if (p.currentScrape) {
-        // Fallback to top 2 logic if allCompetitors array is entirely missing or empty
         if (calcBruttoVK < (p.currentScrape.rank1_price || 999999)) projRank = "Rang 1";
         else if (calcBruttoVK < (p.currentScrape.rank2_price || 999999)) projRank = "Rang 2";
         else projRank = "Schlechter als Rang 2";
@@ -283,7 +283,7 @@ function ProductCard({ p, defaultCalcOpen, isExpandedAll }) {
                                                                 return (
                                                                     <tr key={idx} style={{
                                                                         borderBottom: '1px solid var(--border-color)',
-                                                                        background: isHr ? '#dcfce7' : 'transparent' // light green background for hr
+                                                                        background: isHr ? '#dcfce7' : 'transparent'
                                                                     }}>
                                                                         <td style={{ padding: '0.4rem 0.5rem', color: 'var(--text-muted)' }}>{comp.rank}</td>
                                                                         <td style={{ padding: '0.4rem 0.5rem', fontWeight: isHr ? 600 : 400 }}>
@@ -345,6 +345,13 @@ function ProductCard({ p, defaultCalcOpen, isExpandedAll }) {
                                     >
                                         1 Cent unter Rang 1
                                     </button>
+                                    <button
+                                        onClick={() => onSavePrice(p.id, calcBruttoVK, calcNetto)}
+                                        className="btn"
+                                        style={{ width: '100%', padding: '0.5rem', fontSize: '0.85rem', marginTop: '0.5rem', background: 'var(--success-color)', color: 'white', border: 'none', borderRadius: '0.4rem', cursor: 'pointer', fontWeight: 600 }}
+                                    >
+                                        Neuen Brutto-VK übernehmen
+                                    </button>
                                 </div>
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', fontSize: '0.9rem' }}>
                                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -387,8 +394,11 @@ function PreisueberwachungContent() {
     const [products, setProducts] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
-    const [isScraping, setIsScraping] = useState(false);
+    const [scrapingProgress, setScrapingProgress] = useState(null);
+    // scrapingProgress: null | { isRunning, total, completed, failed: [], completedIds: [] }
     const [isExpandedAll, setIsExpandedAll] = useState(null);
+    const [savedPrices, setSavedPrices] = useState(() => JSON.parse(localStorage.getItem(LS_KEY) || '{}'));
+    const pollIntervalRef = useRef(null);
 
     // Filtering & Sorting State
     const [search, setSearch] = useState(location.state?.prefilterSku || '');
@@ -399,38 +409,66 @@ function PreisueberwachungContent() {
     const [rangFilter, setRangFilter] = useState('Alle');
     const [selectedLights, setSelectedLights] = useState({ green: true, yellow: true, red: true, gray: true });
 
-    useEffect(() => {
-        fetchProducts();
-    }, []);
-
-    const fetchProducts = async () => {
-        try {
-            const res = await axios.get('/api/products');
-            if (res.data.success) {
-                setProducts(res.data.data);
-            } else {
-                setError(res.data.error || 'Unknown error');
-            }
-        } catch (err) {
-            setError(err.message);
-        } finally {
-            setLoading(false);
+    const stopPolling = () => {
+        if (pollIntervalRef.current) {
+            clearInterval(pollIntervalRef.current);
+            pollIntervalRef.current = null;
         }
     };
 
+    const startPolling = () => {
+        if (pollIntervalRef.current) return;
+        pollIntervalRef.current = setInterval(async () => {
+            try {
+                const statusRes = await axios.get('/api/scrape/status');
+                const status = statusRes.data;
+                setScrapingProgress(status);
+
+                const prodRes = await axios.get('/api/products');
+                if (prodRes.data.success) setProducts(prodRes.data.data);
+
+                if (!status.isRunning) {
+                    stopPolling();
+                }
+            } catch (e) {
+                console.error('Scraping status poll error:', e);
+            }
+        }, 3000);
+    };
+
+    useEffect(() => {
+        const init = async () => {
+            try {
+                // Check if a scrape is already running on page load
+                const statusRes = await axios.get('/api/scrape/status');
+                if (statusRes.data.isRunning) {
+                    setScrapingProgress(statusRes.data);
+                    startPolling();
+                }
+                const prodRes = await axios.get('/api/products');
+                if (prodRes.data.success) setProducts(prodRes.data.data);
+            } catch (err) {
+                setError(err.message);
+            } finally {
+                setLoading(false);
+            }
+        };
+        init();
+        return () => stopPolling();
+    }, []);
+
     const startScraping = async () => {
-        setIsScraping(true);
         try {
             const res = await axios.post('/api/scrape/start');
             if (res.data.success) {
-                alert('Scraping-Vorgang wurde im Hintergrund gestartet! (Dies wird sehr lange dauern. Lade die Seite später neu, um Ergebnisse zu sehen.)');
+                setProducts([]);
+                setScrapingProgress({ isRunning: true, total: 0, completed: 0, failed: [], completedIds: [] });
+                startPolling();
             } else {
                 alert('Fehler: ' + (res.data.error || 'Unbekannt.'));
             }
         } catch (error) {
             alert('Netzwerkfehler beim Starten des Scrapings.');
-        } finally {
-            setIsScraping(false);
         }
     };
 
@@ -445,7 +483,7 @@ function PreisueberwachungContent() {
         if (nettoVK > 0 && ekNetto !== null) marginPct = ((nettoVK - ekNetto) / nettoVK) * 100;
 
         let grossProfit = null;
-        if (nettoVK !== null && ekNetto !== null) grossProfit = nettoVK - ekNetto; // BUG FIX 2: Rohertrag/Stück
+        if (nettoVK !== null && ekNetto !== null) grossProfit = nettoVK - ekNetto;
 
         let discountUvp = null;
         if (bruttoVK !== null && p.uvp > 0) discountUvp = ((bruttoVK - p.uvp) / p.uvp) * 100;
@@ -459,7 +497,7 @@ function PreisueberwachungContent() {
         );
         const lowestPrice = lowestRaw || (lowestComp === 999999 ? null : lowestComp);
 
-        const hrPrice = p.currentScrape?.hr_price; // BUG FIX 1: Use Scraped HR price
+        const hrPrice = p.currentScrape?.hr_price;
 
         if (hrPrice !== undefined && hrPrice !== null && lowestPrice !== null) {
             diffLowestEur = hrPrice - lowestPrice;
@@ -483,6 +521,119 @@ function PreisueberwachungContent() {
         return { marginPct, grossProfit, discountUvp, diffLowestEur, diffLowestPct, trafficLight };
     };
 
+    const savePrice = (id, bruttoVK, nettoVK) => {
+        const updated = { ...savedPrices, [id]: { bruttoVK, nettoVK } };
+        setSavedPrices(updated);
+        localStorage.setItem(LS_KEY, JSON.stringify(updated));
+    };
+
+    const exportSavedPricesCSV = () => {
+        const entries = Object.entries(savedPrices);
+        if (entries.length === 0) return;
+        const fmt = (n) => n.toFixed(2).replace('.', ',');
+        const lines = ['SKU;Neuer Brutto-VK;Neuer Netto-VK'];
+        for (const [sku, d] of entries) {
+            lines.push(`${sku};${fmt(d.bruttoVK)};${fmt(d.nettoVK)}`);
+        }
+        const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'neue_preise.csv';
+        a.click();
+        URL.revokeObjectURL(url);
+        setSavedPrices({});
+        localStorage.removeItem(LS_KEY);
+    };
+
+    const exportAllData = (format) => {
+        const allData = products.map(p => ({ ...p, calc: calculateDerived(p) }));
+
+        const rows = allData.map(p => {
+            const s = p.currentScrape;
+            const prev = p.prevScrape;
+
+            // Rank 3 from all_competitors array
+            let rank3Shop = '', rank3Price = null;
+            if (s?.all_competitors) {
+                try {
+                    const comps = JSON.parse(s.all_competitors);
+                    if (Array.isArray(comps) && comps[2]) {
+                        rank3Shop = comps[2].shop || '';
+                        rank3Price = comps[2].price ?? null;
+                    }
+                } catch (e) { /* ignore */ }
+            }
+
+            const hrPrice = s?.hr_price ?? null;
+            const prevHrPrice = prev?.hr_price ?? null;
+            const hrPriceDiff = (hrPrice !== null && prevHrPrice !== null) ? hrPrice - prevHrPrice : null;
+
+            const lowestRaw = s?.lowest_price;
+            const lowestComp = Math.min(s?.rank1_price || 999999, s?.rank2_price || 999999);
+            const lowestPrice = lowestRaw || (lowestComp === 999999 ? null : lowestComp);
+            const diffLowest = (hrPrice !== null && lowestPrice !== null) ? hrPrice - lowestPrice : null;
+
+            let discountUvpPct = null;
+            if (hrPrice !== null && p.uvp > 0) discountUvpPct = ((hrPrice - p.uvp) / p.uvp) * 100;
+
+            let scrapeDate = '';
+            if (s?.timestamp) {
+                const d = new Date(s.timestamp);
+                scrapeDate = `${d.toLocaleDateString('de-DE')} ${d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}`;
+            }
+
+            return {
+                'SKU': p.id,
+                'Titel': p.name,
+                'Eigener Preis Brutto (€)': hrPrice ?? p.price_gross,
+                'UVP (€)': p.uvp,
+                'Abw. vom UVP (%)': discountUvpPct,
+                'Rang HR': s?.hr_rank ?? '',
+                'Rang 1 Shop': s?.rank1_shop ?? '',
+                'Rang 1 Preis (€)': s?.rank1_price ?? '',
+                'Rang 2 Shop': s?.rank2_shop ?? '',
+                'Rang 2 Preis (€)': s?.rank2_price ?? '',
+                'Rang 3 Shop': rank3Shop,
+                'Rang 3 Preis (€)': rank3Price ?? '',
+                'Günstigster Preis (€)': lowestPrice ?? '',
+                'Differenz zum Günstigsten (€)': diffLowest,
+                'Anzahl Wettbewerber': s?.competitor_count ?? '',
+                'Handelsspanne (%)': p.calc.marginPct,
+                'Rohertrag/Stück (€)': p.calc.grossProfit,
+                'Preisveränderung HR (€)': hrPriceDiff,
+                'Einkaufspreis netto (€)': p.purchase_price_net,
+                'Idealo Klicks (30 Tage)': p.clicks_30_days ?? '',
+                'Datum letzter Scrape': scrapeDate,
+            };
+        });
+
+        const filename = `preise_export_${new Date().toISOString().slice(0, 10)}`;
+
+        if (format === 'xlsx') {
+            const ws = XLSX.utils.json_to_sheet(rows);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'Preisüberwachung');
+            XLSX.writeFile(wb, filename + '.xlsx');
+        } else {
+            const headers = Object.keys(rows[0]);
+            const fmtVal = (v) => {
+                if (v === null || v === undefined || v === '') return '';
+                if (typeof v === 'number') return v.toFixed(2).replace('.', ',');
+                const s = String(v);
+                return s.includes(';') ? `"${s}"` : s;
+            };
+            const lines = [headers.join(';'), ...rows.map(row => headers.map(h => fmtVal(row[h])).join(';'))];
+            const blob = new Blob(['\uFEFF' + lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename + '.csv';
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+    };
+
     const toggleLight = (color) => setSelectedLights(prev => ({ ...prev, [color]: !prev[color] }));
 
     // Global timestamp
@@ -493,8 +644,13 @@ function PreisueberwachungContent() {
         lastScrapeTimeStr = `${d.toLocaleDateString('de-DE')} ${d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} Uhr`;
     }
 
+    // During scraping: only show products that are already done in this run
+    const displayProducts = scrapingProgress?.isRunning
+        ? products.filter(p => scrapingProgress.completedIds?.includes(p.id))
+        : products;
+
     // Process and Filter
-    let processedData = products.map(p => ({ ...p, calc: calculateDerived(p) }));
+    let processedData = displayProducts.map(p => ({ ...p, calc: calculateDerived(p) }));
 
     if (search) {
         const s = search.toLowerCase();
@@ -508,11 +664,7 @@ function PreisueberwachungContent() {
 
     if (minAbweichungUvp !== '') {
         const a = parseFloat(minAbweichungUvp);
-        // z z.B. nur Produkte die > 20% unter UVP liegen, dann discountUvp &lt;= -20
-        // Wait, the prompt says "mehr als 20% unter UVP", which means discountUvp &lt;= -20
         if (!isNaN(a)) {
-            // "mindestens X% unter UVP" implies discountUvp should be &lt;= -X. 
-            // the UI input asks for an absolute value, e.g. "20", meaning 20% below.
             processedData = processedData.filter(p => p.calc.discountUvp !== null && p.calc.discountUvp <= -Math.abs(a));
         }
     }
@@ -547,6 +699,12 @@ function PreisueberwachungContent() {
         return 0;
     });
 
+    const isRunning = scrapingProgress?.isRunning;
+    const scrapeDone = scrapingProgress && !scrapingProgress.isRunning && scrapingProgress.total > 0;
+    const scrapeProgressPct = scrapingProgress?.total > 0
+        ? Math.round((scrapingProgress.completed / scrapingProgress.total) * 100)
+        : 0;
+
     return (
         <div className="page-container" style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
             <div className="header-row" style={{ alignItems: 'flex-start', flexDirection: 'column', gap: '1rem' }}>
@@ -555,28 +713,52 @@ function PreisueberwachungContent() {
                         <h2>Preisüberwachung</h2>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                        {Object.keys(savedPrices).length > 0 && (
+                            <button
+                                onClick={exportSavedPricesCSV}
+                                style={{ background: '#1d4ed8', color: 'white', border: 'none', padding: '0.6rem 1.2rem', borderRadius: '0.5rem', cursor: 'pointer', fontWeight: 600, fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
+                            >
+                                ↓ Preise exportieren ({Object.keys(savedPrices).length})
+                            </button>
+                        )}
+                        {products.length > 0 && (
+                            <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                <button
+                                    onClick={() => exportAllData('csv')}
+                                    style={{ background: 'white', color: 'var(--text-color)', border: '1px solid var(--border-color)', padding: '0.6rem 1rem', borderRadius: '0.5rem', cursor: 'pointer', fontWeight: 500, fontSize: '0.85rem' }}
+                                >
+                                    ↓ CSV
+                                </button>
+                                <button
+                                    onClick={() => exportAllData('xlsx')}
+                                    style={{ background: 'white', color: 'var(--text-color)', border: '1px solid var(--border-color)', padding: '0.6rem 1rem', borderRadius: '0.5rem', cursor: 'pointer', fontWeight: 500, fontSize: '0.85rem' }}
+                                >
+                                    ↓ Excel
+                                </button>
+                            </div>
+                        )}
                         <div style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>
                             Letzter Scrape: <strong>{lastScrapeTimeStr}</strong>
                         </div>
                         <button
                             onClick={startScraping}
-                            disabled={isScraping}
+                            disabled={isRunning}
                             style={{
                                 background: 'var(--success-color)',
                                 color: 'white',
                                 border: 'none',
                                 padding: '0.6rem 1.2rem',
                                 borderRadius: '0.5rem',
-                                cursor: isScraping ? 'wait' : 'pointer',
-                                opacity: isScraping ? 0.7 : 1,
+                                cursor: isRunning ? 'wait' : 'pointer',
+                                opacity: isRunning ? 0.7 : 1,
                                 fontWeight: 600,
                                 display: 'flex',
                                 alignItems: 'center',
                                 gap: '0.5rem'
                             }}
                         >
-                            {isScraping ? <span className="animate-spin" style={{ display: 'inline-block' }}>↻</span> : '⟳'}
-                            {isScraping ? 'Starte...' : 'Neuen Scrape starten'}
+                            {isRunning ? <span className="animate-spin" style={{ display: 'inline-block' }}>↻</span> : '⟳'}
+                            {isRunning ? `Scraping läuft... (${scrapingProgress.completed}/${scrapingProgress.total})` : 'Neuen Scrape starten'}
                         </button>
                     </div>
                 </div>
@@ -703,10 +885,79 @@ function PreisueberwachungContent() {
                 </div>
             </div>
 
+            {/* Scraping Progress Banner */}
+            {isRunning && (
+                <div style={{
+                    background: 'linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%)',
+                    border: '1px solid #86efac',
+                    borderRadius: '0.75rem',
+                    padding: '1.25rem 1.5rem',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '0.75rem'
+                }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', fontWeight: 600, color: '#15803d', fontSize: '1rem' }}>
+                        <span style={{ display: 'inline-block', animation: 'spin 1s linear infinite' }}>↻</span>
+                        Scraping läuft: {scrapingProgress.completed} von {scrapingProgress.total} Produkten gescrapt
+                        <span style={{ marginLeft: 'auto', fontWeight: 400, fontSize: '0.9rem', color: '#166534' }}>
+                            {scrapeProgressPct}%
+                        </span>
+                    </div>
+                    <div style={{ height: '6px', background: '#bbf7d0', borderRadius: '3px', overflow: 'hidden' }}>
+                        <div style={{
+                            height: '100%',
+                            width: `${scrapeProgressPct}%`,
+                            background: 'var(--success-color)',
+                            borderRadius: '3px',
+                            transition: 'width 0.4s ease'
+                        }} />
+                    </div>
+                    <div style={{ fontSize: '0.85rem', color: '#166534' }}>
+                        Ergebnisse erscheinen automatisch, sobald Produkte gescrapt werden...
+                    </div>
+                </div>
+            )}
+
+            {/* Scraping Done Banner */}
+            {scrapeDone && (
+                <div style={{
+                    background: scrapingProgress.failed.length > 0 ? '#fffbeb' : '#f0fdf4',
+                    border: `1px solid ${scrapingProgress.failed.length > 0 ? '#fcd34d' : '#86efac'}`,
+                    borderRadius: '0.75rem',
+                    padding: '1rem 1.5rem',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '0.5rem',
+                    position: 'relative'
+                }}>
+                    <button
+                        onClick={() => setScrapingProgress(null)}
+                        style={{ position: 'absolute', top: '0.75rem', right: '1rem', background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.1rem', color: '#6b7280', lineHeight: 1 }}
+                        title="Schließen"
+                    >
+                        ×
+                    </button>
+                    <div style={{ fontWeight: 600, color: '#15803d', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        ✓ Scraping abgeschlossen — {scrapingProgress.completed - scrapingProgress.failed.length} von {scrapingProgress.total} erfolgreich
+                    </div>
+                    {scrapingProgress.failed.length > 0 && (
+                        <div style={{ fontSize: '0.875rem', color: '#92400e' }}>
+                            <strong>Fehlgeschlagen ({scrapingProgress.failed.length}):</strong>{' '}
+                            {scrapingProgress.failed.map(f => `${f.name} (${f.id})`).join(', ')}
+                        </div>
+                    )}
+                </div>
+            )}
+
             {loading ? (
                 <div style={{ textAlign: 'center', padding: '4rem' }}><span className="animate-spin" style={{ display: 'inline-block' }}>↻</span> Lade Daten...</div>
             ) : error ? (
                 <div style={{ color: 'var(--danger-color)' }}>Fehler: {error}</div>
+            ) : isRunning && processedData.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '4rem', color: 'var(--text-muted)' }}>
+                    <div style={{ fontSize: '2rem', marginBottom: '1rem' }}>⏳</div>
+                    <div style={{ fontSize: '1rem' }}>Warte auf erste Scrape-Ergebnisse...</div>
+                </div>
             ) : (
                 <div className="cards-grid" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
                     {processedData.map(p => (
@@ -715,6 +966,7 @@ function PreisueberwachungContent() {
                             p={p}
                             defaultCalcOpen={location.state?.openCalc && location.state?.prefilterSku === p.id}
                             isExpandedAll={isExpandedAll}
+                            onSavePrice={savePrice}
                         />
                     ))}
                 </div>

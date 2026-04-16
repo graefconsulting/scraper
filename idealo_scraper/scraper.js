@@ -1300,22 +1300,6 @@ app.get('/api/warenkorb', (req, res) => {
             });
         }
 
-        // Werbekosten pro Einheit aus Q1 XLSX (Google + Idealo + MS) / Menge
-        const adCostPerUnit = {};
-        if (fs.existsSync(q1Path)) {
-            const wb = XLSX.readFile(q1Path);
-            XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: null }).forEach(r => {
-                const sku = String(r['Artikelnummer'] || '').trim().toUpperCase();
-                const menge = parseDeNum(String(r['Menge'] || '')) || 0;
-                if (!sku || menge <= 0) return;
-                const google = parseDeNum(String(r['Google'] || '')) || 0;
-                const idealo = parseDeNum(String(r['Idealo'] || '')) || 0;
-                const ms = parseDeNum(String(r['MS'] || '')) || 0;
-                const totalAd = google + idealo + ms;
-                adCostPerUnit[sku] = totalAd / menge;
-            });
-        }
-
         // Bestellungen einlesen (nur SW6 live) — mit vollständigen Kostendaten
         // 4. Fallback: Produktname aus Bestelldetails (erster Teil vor " | ")
         const bestPath = path.join(dataDir, 'Bestellungen Jan7-Apr7.csv');
@@ -1364,11 +1348,10 @@ app.get('/api/warenkorb', (req, res) => {
             }
         });
 
-        // Bestellgewinn pro Order berechnen
-        const orderProfits = {}; // orderNr -> profit (€, inkl. Werbekosten)
+        // Bestellgewinn pro Order berechnen (ohne Werbekosten — Quartalsdurchschnitt nicht per-Order sinnvoll)
+        const orderProfits = {}; // orderNr -> profit (€, ohne Werbekosten)
         for (const [orderNr, order] of Object.entries(ordersMap)) {
             if (order.items.length === 0) { orderProfits[orderNr] = null; continue; }
-            const totalStk = order.items.reduce((s, i) => s + i.anzahl, 0);
             const shippingCost = getShippingCost(order.versandart);
             const paymentPct = order.betrag * 0.0299;
             const orderFixCost = shippingCost + 0.39 + paymentPct + 0.25 + 0.15;
@@ -1379,8 +1362,7 @@ app.get('/api/warenkorb', (req, res) => {
                 const ek = (item.ekNetto !== null && item.ekNetto !== undefined) ? item.ekNetto : 0;
                 const couponShare = totalVkNetto > 0 ? (item.vkNetto / totalVkNetto) * order.gutscheinTotal : 0;
                 const revenueNet = item.vkNetto - couponShare;
-                const adCost = (adCostPerUnit[item.sku] || 0) * item.anzahl;
-                profit += revenueNet - ek * item.anzahl - adCost;
+                profit += revenueNet - ek * item.anzahl;
             }
             orderProfits[orderNr] = Math.round(profit * 100) / 100;
         }

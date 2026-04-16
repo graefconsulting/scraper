@@ -168,7 +168,7 @@ export default function Warenkorbanalyse() {
                 <StatCard icon={ShoppingCart} label="Bestellungen analysiert" value={meta.totalOrders.toLocaleString('de-DE')} color="#4f46e5" />
                 <StatCard icon={Package} label="Multi-Produkt-Bestellungen" value={fmtPct(meta.multiItemRate)} sub={`${meta.multiItemOrders.toLocaleString('de-DE')} Bestellungen`} color="#d97706" />
                 <StatCard icon={TrendingUp} label="Ø Artikel pro Bestellung" value={fmt(meta.avgBasketSize, 2)} color="#15803d" />
-                <StatCard icon={Euro} label="Ø Bestellgewinn (inkl. Werbung)" value={fmtEur(meta.avgOrderProfit)} sub={`${fmtPct(meta.profitableRate)} profitabel`} color={meta.avgOrderProfit >= 5 ? '#15803d' : meta.avgOrderProfit >= 0 ? '#d97706' : '#dc2626'} />
+                <StatCard icon={Euro} label="Ø Bestellgewinn (ohne Werbung)" value={fmtEur(meta.avgOrderProfit)} sub={`${fmtPct(meta.profitableRate)} profitabel`} color={meta.avgOrderProfit >= 5 ? '#15803d' : meta.avgOrderProfit >= 0 ? '#d97706' : '#dc2626'} />
                 <StatCard icon={Users} label="Bundle-Kandidaten" value={filtered.filter(p => p.soloRate < 60).length} sub="Solo-Rate < 60%" color="#7c3aed" />
             </div>
 
@@ -189,7 +189,7 @@ export default function Warenkorbanalyse() {
                                 </tr>
                             </thead>
                             <tbody>
-                                {topPairs.map((pair, i) => (
+                                {topPairs.filter(pair => pair.avgOrderProfit === null || pair.avgOrderProfit >= 0).map((pair, i) => (
                                     <tr key={i} style={{ borderBottom: '1px solid #f1f5f9' }}>
                                         <td style={{ padding: '0.55rem 0.75rem', maxWidth: 240 }}>
                                             <div style={{ fontWeight: 600, fontSize: '0.82rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{pair.nameA}</div>
@@ -356,7 +356,7 @@ export default function Warenkorbanalyse() {
             </div>
 
             <div style={{ fontSize: '0.75rem', color: '#94a3b8', padding: '0 0.25rem' }}>
-                Nur SW6-Live-Bestellungen (Jan–Apr). Gewinn = VKNetto − EKNetto − Versand − Payment − Verpackung − Software − anteilige Werbekosten (aus Q1-XLSX). Solo-Rate: Anteil Bestellungen wo nur dieses Produkt enthalten war.
+                Nur SW6-Live-Bestellungen (Jan–Apr). Gewinn = VKNetto − EKNetto − Versand − Payment − Verpackung − Software (ohne Werbekosten — Quartalsdurchschnitt nicht per-Bestellung sinnvoll). Solo-Rate: Anteil Bestellungen wo nur dieses Produkt enthalten war.
             </div>
         </div>
     );
