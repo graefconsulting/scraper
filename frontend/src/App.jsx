@@ -1,6 +1,6 @@
 import React from 'react';
 import { Routes, Route, NavLink, Navigate } from 'react-router-dom';
-import { Search, LayoutDashboard, Settings, BarChart3, Lightbulb, ArrowRightLeft, Tag } from 'lucide-react';
+import { Search, LayoutDashboard, Settings, BarChart3, Lightbulb, ArrowRightLeft, Tag, ShoppingCart } from 'lucide-react';
 import Preisueberwachung from './pages/Preisueberwachung';
 import MarketResearch from './pages/MarketResearch';
 import Dashboard from './pages/Dashboard';
@@ -9,6 +9,7 @@ import Auswertung from './pages/Auswertung';
 import Empfehlungen from './pages/Empfehlungen';
 import Preisaenderungen from './pages/Preisaenderungen';
 import Rabattaktion from './pages/Rabattaktion';
+import Warenkorbanalyse from './pages/Warenkorbanalyse';
 
 function Sidebar() {
   return (
@@ -36,6 +37,9 @@ function Sidebar() {
           <NavLink to="/rabattaktion" className={({ isActive }) => "nav-item " + (isActive ? "active" : "")}>
             <Tag /> Rabattaktion
           </NavLink>
+          <NavLink to="/warenkorb" className={({ isActive }) => "nav-item " + (isActive ? "active" : "")}>
+            <ShoppingCart /> Warenkorbanalyse
+          </NavLink>
         </div>
         <div style={{ marginTop: 'auto', borderTop: '1px solid var(--border-color)', paddingTop: '0.5rem' }}>
           <NavLink to="/einstellungen" className={({ isActive }) => "nav-item " + (isActive ? "active" : "")}>
@@ -61,6 +65,7 @@ function App() {
           <Route path="/preisaenderungen" element={<Preisaenderungen />} />
           <Route path="/rabattaktion" element={<Rabattaktion />} />
           <Route path="/preisueberwachung" element={<Preisueberwachung />} />
+          <Route path="/warenkorb" element={<Warenkorbanalyse />} />
           <Route path="/einstellungen" element={<Einstellungen />} />
         </Routes>
       </main>

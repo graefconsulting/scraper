@@ -1257,6 +1257,156 @@ app.post('/api/auswertung/scrape/start', (req, res) => {
 });
 
 // ------------------------------------------------------------------
+// WARENKORBANALYSE: Beikäufe, Solo-Rate, Basket Analysis
+// ------------------------------------------------------------------
+app.get('/api/warenkorb', (req, res) => {
+    try {
+        const dataDir = path.join(__dirname, 'data');
+
+        // Produktnamen laden
+        const prodPath = path.join(dataDir, 'Alle Produkte.csv');
+        const prodMap = {};
+        if (fs.existsSync(prodPath)) {
+            parseCSV(prodPath).forEach(r => {
+                const sku = r['Artikelnummer']?.trim().toUpperCase();
+                if (!sku) return;
+                let name = r['Produktname'] || '';
+                const pipeIdx = name.indexOf('|');
+                if (pipeIdx > 0) name = name.substring(0, pipeIdx).trim();
+                prodMap[sku] = name;
+            });
+        }
+
+        // Bestellungen einlesen (nur SW6 live)
+        const bestPath = path.join(dataDir, 'Bestellungen Jan7-Apr7.csv');
+        if (!fs.existsSync(bestPath)) {
+            return res.status(404).json({ success: false, error: 'Bestellungen CSV nicht gefunden' });
+        }
+
+        const orders = {}; // orderNr -> { items: [{sku, anzahl}] }
+        parseCSV(bestPath).forEach(r => {
+            if ((r['Herkunft'] || '').trim() !== 'SW6 live') return;
+            const orderNr = (r['ordernumber'] || '').trim();
+            const sku = (r['Artikelnummer'] || '').trim().toUpperCase();
+            const anzahl = parseInt(r['Anzahl'] || '1') || 1;
+            if (!sku || sku === 'NULL' || !orderNr) return;
+            if (!orders[orderNr]) orders[orderNr] = { items: [] };
+            const existing = orders[orderNr].items.find(i => i.sku === sku);
+            if (existing) existing.anzahl += anzahl;
+            else orders[orderNr].items.push({ sku, anzahl });
+        });
+
+        const orderList = Object.values(orders);
+        const totalOrders = orderList.length;
+
+        // Per-Produkt Aggregation
+        const skuStats = {};
+        for (const order of orderList) {
+            const skus = order.items.map(i => i.sku);
+            const isSolo = skus.length === 1;
+            for (const item of order.items) {
+                const { sku, anzahl } = item;
+                if (!skuStats[sku]) skuStats[sku] = { orderCount: 0, totalUnits: 0, soloCount: 0, coOrders: {} };
+                const s = skuStats[sku];
+                s.orderCount++;
+                s.totalUnits += anzahl;
+                if (isSolo) s.soloCount++;
+                for (const other of skus) {
+                    if (other === sku) continue;
+                    s.coOrders[other] = (s.coOrders[other] || 0) + 1;
+                }
+            }
+        }
+
+        // Ergebnis pro Produkt aufbauen
+        const products = Object.entries(skuStats).map(([sku, s]) => {
+            const topCombos = Object.entries(s.coOrders)
+                .map(([otherSku, coCount]) => {
+                    const other = skuStats[otherSku];
+                    const suppA = s.orderCount / totalOrders;
+                    const suppB = other ? other.orderCount / totalOrders : 0;
+                    const suppAB = coCount / totalOrders;
+                    const lift = suppA > 0 && suppB > 0 ? suppAB / (suppA * suppB) : 0;
+                    const confidence = s.orderCount > 0 ? (coCount / s.orderCount) * 100 : 0;
+                    return {
+                        sku: otherSku,
+                        name: prodMap[otherSku] || otherSku,
+                        coCount,
+                        lift: Math.round(lift * 100) / 100,
+                        confidence: Math.round(confidence * 10) / 10,
+                    };
+                })
+                .sort((a, b) => b.lift - a.lift)
+                .slice(0, 5);
+
+            return {
+                sku,
+                name: prodMap[sku] || sku,
+                orderCount: s.orderCount,
+                totalUnits: s.totalUnits,
+                avgQtyPerOrder: Math.round((s.totalUnits / s.orderCount) * 100) / 100,
+                soloCount: s.soloCount,
+                soloRate: Math.round((s.soloCount / s.orderCount) * 1000) / 10,
+                topCombos,
+            };
+        }).sort((a, b) => b.orderCount - a.orderCount);
+
+        // Globale Top-Paare nach Lift (min. 3 gemeinsame Bestellungen)
+        const pairCounts = {};
+        for (const order of orderList) {
+            const skus = [...new Set(order.items.map(i => i.sku))].sort();
+            for (let i = 0; i < skus.length; i++) {
+                for (let j = i + 1; j < skus.length; j++) {
+                    const key = skus[i] + '||' + skus[j];
+                    pairCounts[key] = (pairCounts[key] || 0) + 1;
+                }
+            }
+        }
+
+        const MIN_SUPPORT = 3;
+        const topPairs = Object.entries(pairCounts)
+            .filter(([, count]) => count >= MIN_SUPPORT)
+            .map(([key, count]) => {
+                const [skuA, skuB] = key.split('||');
+                const sA = skuStats[skuA];
+                const sB = skuStats[skuB];
+                const suppA = sA ? sA.orderCount / totalOrders : 0;
+                const suppB = sB ? sB.orderCount / totalOrders : 0;
+                const suppAB = count / totalOrders;
+                const lift = suppA > 0 && suppB > 0 ? suppAB / (suppA * suppB) : 0;
+                return {
+                    skuA, nameA: prodMap[skuA] || skuA,
+                    skuB, nameB: prodMap[skuB] || skuB,
+                    count,
+                    lift: Math.round(lift * 100) / 100,
+                    confAB: sA && sA.orderCount > 0 ? Math.round((count / sA.orderCount) * 1000) / 10 : 0,
+                    confBA: sB && sB.orderCount > 0 ? Math.round((count / sB.orderCount) * 1000) / 10 : 0,
+                };
+            })
+            .sort((a, b) => b.lift - a.lift)
+            .slice(0, 25);
+
+        const multiItemOrders = orderList.filter(o => o.items.length > 1).length;
+        const totalUnitsAll = orderList.reduce((s, o) => s + o.items.reduce((ss, i) => ss + i.anzahl, 0), 0);
+
+        res.json({
+            success: true,
+            meta: {
+                totalOrders,
+                multiItemOrders,
+                multiItemRate: totalOrders > 0 ? Math.round((multiItemOrders / totalOrders) * 1000) / 10 : 0,
+                avgBasketSize: totalOrders > 0 ? Math.round((totalUnitsAll / totalOrders) * 100) / 100 : 0,
+            },
+            products,
+            topPairs,
+        });
+    } catch (err) {
+        console.error('Warenkorb error:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// ------------------------------------------------------------------
 // EMPFEHLUNGEN: Zero-revenue products from Produkte Dez-Feb.xlsx
 // ------------------------------------------------------------------
 app.get('/api/empfehlungen/zero-revenue', (req, res) => {
