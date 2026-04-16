@@ -1263,21 +1263,45 @@ app.get('/api/warenkorb', (req, res) => {
     try {
         const dataDir = path.join(__dirname, 'data');
 
-        // Produktnamen laden
-        const prodPath = path.join(dataDir, 'Alle Produkte.csv');
+        // Produktnamen laden — mit Fallback-Kaskade
+        // 1. Alle Produkte.csv (Produktname)
         const prodMap = {};
+        const prodPath = path.join(dataDir, 'Alle Produkte.csv');
         if (fs.existsSync(prodPath)) {
             parseCSV(prodPath).forEach(r => {
-                const sku = r['Artikelnummer']?.trim().toUpperCase();
+                const sku = (r['Artikelnummer'] || '').trim().toUpperCase();
                 if (!sku) return;
                 let name = r['Produktname'] || '';
                 const pipeIdx = name.indexOf('|');
                 if (pipeIdx > 0) name = name.substring(0, pipeIdx).trim();
-                prodMap[sku] = name;
+                if (name) prodMap[sku] = name;
+            });
+        }
+        // 2. Produkte-Q1.xlsx (Artikelname)
+        const q1Path = path.join(dataDir, 'Produkte-Q1.xlsx');
+        if (fs.existsSync(q1Path)) {
+            const wb = XLSX.readFile(q1Path);
+            XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: null }).forEach(r => {
+                const sku = String(r['Artikelnummer'] || '').trim().toUpperCase();
+                if (!sku || prodMap[sku]) return;
+                const name = String(r['Artikelname'] || '').trim();
+                if (name) prodMap[sku] = name;
+            });
+        }
+        // 3. Produkte Dez-Feb.xlsx (Artikelname)
+        const dezFebPath = path.join(dataDir, 'Produkte Dez-Feb.xlsx');
+        if (fs.existsSync(dezFebPath)) {
+            const wb = XLSX.readFile(dezFebPath);
+            XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: null }).forEach(r => {
+                const sku = String(r['Artikelnummer'] || '').trim().toUpperCase();
+                if (!sku || prodMap[sku]) return;
+                const name = String(r['Artikelname'] || '').trim();
+                if (name) prodMap[sku] = name;
             });
         }
 
         // Bestellungen einlesen (nur SW6 live)
+        // 4. Fallback: Produktname aus Bestelldetails (erster Teil vor " | ")
         const bestPath = path.join(dataDir, 'Bestellungen Jan7-Apr7.csv');
         if (!fs.existsSync(bestPath)) {
             return res.status(404).json({ success: false, error: 'Bestellungen CSV nicht gefunden' });
@@ -1290,6 +1314,15 @@ app.get('/api/warenkorb', (req, res) => {
             const sku = (r['Artikelnummer'] || '').trim().toUpperCase();
             const anzahl = parseInt(r['Anzahl'] || '1') || 1;
             if (!sku || sku === 'NULL' || !orderNr) return;
+            // Fallback name from Bestelldetails
+            if (!prodMap[sku]) {
+                const details = (r['Bestelldetails'] || '').trim();
+                if (details) {
+                    let name = details.split(' | ')[0].trim();
+                    name = name.replace(/ Angebots-Nr\..*$/, '').trim();
+                    if (name) prodMap[sku] = name;
+                }
+            }
             if (!orders[orderNr]) orders[orderNr] = { items: [] };
             const existing = orders[orderNr].items.find(i => i.sku === sku);
             if (existing) existing.anzahl += anzahl;
