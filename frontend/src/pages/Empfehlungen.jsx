@@ -482,6 +482,7 @@ export default function Empfehlungen() {
     const [priceChanges, setPriceChanges] = useState(() => JSON.parse(localStorage.getItem(PRICE_CHANGES_KEY) || '{}'));
     const [dtp, setDtp] = useState(() => JSON.parse(localStorage.getItem(DAUERTIEFPREIS_KEY) || '{}'));
     const [expandedSkus, setExpandedSkus] = useState({});
+    const [herstellerFilter, setHerstellerFilter] = useState('all');
 
     const toggleExpand = (sku) => {
         setExpandedSkus(prev => {
@@ -591,16 +592,27 @@ export default function Empfehlungen() {
         } catch (e) { alert('Scrape konnte nicht gestartet werden: ' + e.message); }
     };
 
+    // Hersteller-Liste + Filter
+    const herstellerList = useMemo(() => {
+        const set = new Set(data.map(p => p.hersteller).filter(Boolean));
+        return [...set].sort();
+    }, [data]);
+
+    const filteredData = useMemo(() => {
+        if (herstellerFilter === 'all') return data;
+        return data.filter(p => p.hersteller === herstellerFilter);
+    }, [data, herstellerFilter]);
+
     // Klassifizierung
     const tiers = useMemo(() => {
         const t = { 1: [], 2: [], 3: [], 4: [], 5: [], 6: [], 7: [], 8: [], 9: [], 0: [] };
-        data.forEach(p => {
+        filteredData.forEach(p => {
             if ((p.menge90d || 0) === 0) return;
             const c = classify(p);
             t[c.tier].push({ ...p, _c: c });
         });
         return t;
-    }, [data]);
+    }, [filteredData]);
 
     // Tier-Statistiken: Umsatz + spezifische Kennzahlen
     const tierStats = useMemo(() => {
@@ -631,7 +643,7 @@ export default function Empfehlungen() {
     if (loading) return <div style={{ padding: '2rem', color: 'var(--text-muted)' }}>Lade Daten...</div>;
     if (error) return <div style={{ padding: '2rem', color: '#ef4444' }}>Fehler: {error}</div>;
 
-    const activeCount = data.filter(p => (p.menge90d || 0) > 0).length;
+    const activeCount = filteredData.filter(p => (p.menge90d || 0) > 0).length;
 
     return (
         <div style={{ padding: '1.5rem 2rem', maxWidth: '1500px', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
@@ -644,6 +656,14 @@ export default function Empfehlungen() {
                     </p>
                 </div>
                 <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'center' }}>
+                    <select
+                        value={herstellerFilter}
+                        onChange={e => setHerstellerFilter(e.target.value)}
+                        style={{ padding: '0.45rem 0.75rem', borderRadius: '6px', border: '1px solid var(--border-color)', fontSize: '0.84rem', background: herstellerFilter !== 'all' ? '#eef2ff' : 'white', color: herstellerFilter !== 'all' ? '#4f46e5' : 'inherit', fontWeight: herstellerFilter !== 'all' ? 600 : 400, cursor: 'pointer' }}
+                    >
+                        <option value="all">Alle Hersteller</option>
+                        {herstellerList.map(h => <option key={h} value={h}>{h}</option>)}
+                    </select>
                     <div style={{ position: 'relative' }}>
                         <Search size={15} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: '#9ca3af' }} />
                         <input
