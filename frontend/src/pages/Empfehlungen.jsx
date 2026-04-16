@@ -1206,6 +1206,7 @@ export default function Empfehlungen() {
                     margeJetzt: p => p._c.margeRabatt,
                     margeNeu: p => p._c.newMargeRabatt,
                     rang: p => p.currentScrape?.hr_rank ?? 99,
+                    wettbewerber: p => p.currentScrape?.competitor_count ?? 0,
                     umsatz: p => p.umsatzNetto90d,
                 }}
                 extraBadges={tierStats[7]?.umsatz > 0 && (
@@ -1225,7 +1226,9 @@ export default function Empfehlungen() {
                                     <SortTh sortKey="diffPct" sort={sort} onSort={onSort}>Δ Preis</SortTh>
                                     <SortTh sortKey="margeJetzt" sort={sort} onSort={onSort}>Marge −10% jetzt</SortTh>
                                     <SortTh sortKey="margeNeu" sort={sort} onSort={onSort}>Marge −10% neu</SortTh>
-                                    <SortTh sortKey="rang" sort={sort} onSort={onSort}>Rang/Rang1</SortTh>
+                                    <SortTh sortKey="rang" sort={sort} onSort={onSort}>Rang / Rang1-Preis</SortTh>
+                                    <SortTh sortKey="wettbewerber" sort={sort} onSort={onSort}>Wettbewerber</SortTh>
+                                    <Th>Scrape-Datum</Th>
                                     <Th align="center">Aktion</Th>
                                 </tr>
                             </thead>
@@ -1235,6 +1238,9 @@ export default function Empfehlungen() {
                                     const saved = !!priceChanges[p.sku];
                                     const diffPct = p.vkBrutto > 0 ? ((c.newVkBrutto - p.vkBrutto) / p.vkBrutto) * 100 : 0;
                                     const exp = !!expandedSkus[p.sku];
+                                    const scrapeTs = p.currentScrape?.timestamp;
+                                    const scrapeAge = scrapeTs ? Math.floor((Date.now() - new Date(scrapeTs).getTime()) / 86400000) : null;
+                                    const scrapeColor = scrapeAge === null ? '#9ca3af' : scrapeAge > 14 ? '#ef4444' : scrapeAge > 7 ? '#d97706' : '#10b981';
                                     return (
                                         <React.Fragment key={p.sku}>
                                             <tr>
@@ -1249,11 +1255,17 @@ export default function Empfehlungen() {
                                                     {p.currentScrape?.hr_rank ? `Rang ${p.currentScrape.hr_rank}` : '–'}
                                                     {c.rank1 && ` / ${fmt(c.rank1)}€`}
                                                 </Td>
+                                                <Td color="var(--text-muted)">
+                                                    {p.currentScrape?.competitor_count ?? '–'}
+                                                </Td>
+                                                <Td color={scrapeColor} st={{ fontSize: '0.75rem' }}>
+                                                    {scrapeAge === null ? '–' : scrapeAge === 0 ? 'heute' : `vor ${scrapeAge}d`}
+                                                </Td>
                                                 <Td align="center">
                                                     <ActionButton active={saved} onClick={() => togglePrice(p, c, 'senken')} label="Übernehmen" color="#15803d" />
                                                 </Td>
                                             </tr>
-                                            {exp && <ExpandedRow p={p} c={c} colSpan={9} onSavePrice={savePriceFromCalculator} />}
+                                            {exp && <ExpandedRow p={p} c={c} colSpan={11} onSavePrice={savePriceFromCalculator} />}
                                         </React.Fragment>
                                     );
                                 })}
@@ -1273,6 +1285,7 @@ export default function Empfehlungen() {
                     rank2: p => p._c.rank2,
                     margeJetzt: p => p._c.margeRabatt,
                     margeNeu: p => p._c.newMargeRabatt,
+                    wettbewerber: p => p.currentScrape?.competitor_count ?? 0,
                     umsatz: p => p.umsatzNetto90d,
                 }}
                 extraBadges={tierStats[8]?.umsatz > 0 && (
@@ -1292,6 +1305,8 @@ export default function Empfehlungen() {
                                     <SortTh sortKey="rank2" sort={sort} onSort={onSort}>Rang2-Preis</SortTh>
                                     <SortTh sortKey="margeJetzt" sort={sort} onSort={onSort}>Marge −10% jetzt</SortTh>
                                     <SortTh sortKey="margeNeu" sort={sort} onSort={onSort}>Marge −10% neu</SortTh>
+                                    <SortTh sortKey="wettbewerber" sort={sort} onSort={onSort}>Wettbewerber</SortTh>
+                                    <Th>Scrape-Datum</Th>
                                     <Th align="center">Aktion</Th>
                                 </tr>
                             </thead>
@@ -1300,6 +1315,9 @@ export default function Empfehlungen() {
                                     const c = p._c;
                                     const saved = !!priceChanges[p.sku];
                                     const exp = !!expandedSkus[p.sku];
+                                    const scrapeTs = p.currentScrape?.timestamp;
+                                    const scrapeAge = scrapeTs ? Math.floor((Date.now() - new Date(scrapeTs).getTime()) / 86400000) : null;
+                                    const scrapeColor = scrapeAge === null ? '#9ca3af' : scrapeAge > 14 ? '#ef4444' : scrapeAge > 7 ? '#d97706' : '#10b981';
                                     return (
                                         <React.Fragment key={p.sku}>
                                             <tr>
@@ -1310,11 +1328,17 @@ export default function Empfehlungen() {
                                                 <Td color="var(--text-muted)">{fmtEur(c.rank2)}</Td>
                                                 <Td color="#10b981">{fmtPct(c.margeRabatt)}</Td>
                                                 <Td color="#10b981" weight={700}>{fmtPct(c.newMargeRabatt)}</Td>
+                                                <Td color="var(--text-muted)">
+                                                    {p.currentScrape?.competitor_count ?? '–'}
+                                                </Td>
+                                                <Td color={scrapeColor} st={{ fontSize: '0.75rem' }}>
+                                                    {scrapeAge === null ? '–' : scrapeAge === 0 ? 'heute' : `vor ${scrapeAge}d`}
+                                                </Td>
                                                 <Td align="center">
                                                     <ActionButton active={saved} onClick={() => togglePrice(p, c, 'hochtest')} label="Übernehmen" color="#7e22ce" />
                                                 </Td>
                                             </tr>
-                                            {exp && <ExpandedRow p={p} c={c} colSpan={8} onSavePrice={savePriceFromCalculator} />}
+                                            {exp && <ExpandedRow p={p} c={c} colSpan={10} onSavePrice={savePriceFromCalculator} />}
                                         </React.Fragment>
                                     );
                                 })}
