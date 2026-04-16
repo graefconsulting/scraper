@@ -1396,6 +1396,7 @@ app.get('/api/warenkorb', (req, res) => {
         // Ergebnis pro Produkt aufbauen
         const products = Object.entries(skuStats).map(([sku, s]) => {
             const topCombos = Object.entries(s.coOrders)
+                .filter(([, co]) => co.count >= 3)
                 .map(([otherSku, co]) => {
                     const other = skuStats[otherSku];
                     const suppA = s.orderCount / totalOrders;
