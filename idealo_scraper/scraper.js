@@ -1396,7 +1396,10 @@ app.get('/api/warenkorb', (req, res) => {
         // Ergebnis pro Produkt aufbauen
         const products = Object.entries(skuStats).map(([sku, s]) => {
             const topCombos = Object.entries(s.coOrders)
-                .filter(([, co]) => co.count >= 3)
+                .filter(([otherSku, co]) => {
+                    const other = skuStats[otherSku];
+                    return co.count >= 3 && other && other.orderCount >= 10;
+                })
                 .map(([otherSku, co]) => {
                     const other = skuStats[otherSku];
                     const suppA = s.orderCount / totalOrders;
@@ -1447,8 +1450,15 @@ app.get('/api/warenkorb', (req, res) => {
         }
 
         const MIN_SUPPORT = 3;
+        const MIN_INDIVIDUAL = 10; // Jedes Produkt muss min. 10 eigene Bestellungen haben
         const topPairs = Object.entries(pairData)
-            .filter(([, d]) => d.count >= MIN_SUPPORT)
+            .filter(([key, d]) => {
+                if (d.count < MIN_SUPPORT) return false;
+                const [skuA, skuB] = key.split('||');
+                const sA = skuStats[skuA];
+                const sB = skuStats[skuB];
+                return sA && sB && sA.orderCount >= MIN_INDIVIDUAL && sB.orderCount >= MIN_INDIVIDUAL;
+            })
             .map(([key, d]) => {
                 const [skuA, skuB] = key.split('||');
                 const sA = skuStats[skuA];
