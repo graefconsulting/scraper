@@ -1300,20 +1300,52 @@ app.get('/api/warenkorb', (req, res) => {
             });
         }
 
-        // Bestellungen einlesen (nur SW6 live)
+        // Werbekosten pro Einheit aus Q1 XLSX (Google + Idealo + MS) / Menge
+        const adCostPerUnit = {};
+        if (fs.existsSync(q1Path)) {
+            const wb = XLSX.readFile(q1Path);
+            XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: null }).forEach(r => {
+                const sku = String(r['Artikelnummer'] || '').trim().toUpperCase();
+                const menge = parseDeNum(String(r['Menge'] || '')) || 0;
+                if (!sku || menge <= 0) return;
+                const google = parseDeNum(String(r['Google'] || '')) || 0;
+                const idealo = parseDeNum(String(r['Idealo'] || '')) || 0;
+                const ms = parseDeNum(String(r['MS'] || '')) || 0;
+                const totalAd = google + idealo + ms;
+                adCostPerUnit[sku] = totalAd / menge;
+            });
+        }
+
+        // Bestellungen einlesen (nur SW6 live) — mit vollständigen Kostendaten
         // 4. Fallback: Produktname aus Bestelldetails (erster Teil vor " | ")
         const bestPath = path.join(dataDir, 'Bestellungen Jan7-Apr7.csv');
         if (!fs.existsSync(bestPath)) {
             return res.status(404).json({ success: false, error: 'Bestellungen CSV nicht gefunden' });
         }
 
-        const orders = {}; // orderNr -> { items: [{sku, anzahl}] }
+        // ordersMap: orderNr -> { items: [{sku, anzahl, vkNetto, ekNetto}], betrag, versandart, gutscheinTotal }
+        const ordersMap = {};
         parseCSV(bestPath).forEach(r => {
             if ((r['Herkunft'] || '').trim() !== 'SW6 live') return;
             const orderNr = (r['ordernumber'] || '').trim();
+            if (!orderNr) return;
             const sku = (r['Artikelnummer'] || '').trim().toUpperCase();
             const anzahl = parseInt(r['Anzahl'] || '1') || 1;
-            if (!sku || sku === 'NULL' || !orderNr) return;
+            const vkNetto = parseDeNum(r['VKNetto']) || 0;
+            const ekNetto = parseDeNum(r['EKNetto']);
+            const betrag = parseDeNum(r['Betrag']) || 0;
+            const versandart = (r['Versandart'] || '').trim();
+            const isGutschein = sku === 'NULL' && vkNetto < 0;
+
+            if (!ordersMap[orderNr]) {
+                ordersMap[orderNr] = { items: [], betrag, versandart, gutscheinTotal: 0 };
+            }
+            if (isGutschein) {
+                ordersMap[orderNr].gutscheinTotal += Math.abs(vkNetto * anzahl);
+                return;
+            }
+            if (!sku || sku === 'NULL') return;
+
             // Fallback name from Bestelldetails
             if (!prodMap[sku]) {
                 const details = (r['Bestelldetails'] || '').trim();
@@ -1323,30 +1355,58 @@ app.get('/api/warenkorb', (req, res) => {
                     if (name) prodMap[sku] = name;
                 }
             }
-            if (!orders[orderNr]) orders[orderNr] = { items: [] };
-            const existing = orders[orderNr].items.find(i => i.sku === sku);
-            if (existing) existing.anzahl += anzahl;
-            else orders[orderNr].items.push({ sku, anzahl });
+            const existing = ordersMap[orderNr].items.find(i => i.sku === sku);
+            if (existing) {
+                existing.anzahl += anzahl;
+                existing.vkNetto += vkNetto * anzahl;
+            } else {
+                ordersMap[orderNr].items.push({ sku, anzahl, vkNetto: vkNetto * anzahl, ekNetto });
+            }
         });
 
-        const orderList = Object.values(orders);
+        // Bestellgewinn pro Order berechnen
+        const orderProfits = {}; // orderNr -> profit (€, inkl. Werbekosten)
+        for (const [orderNr, order] of Object.entries(ordersMap)) {
+            if (order.items.length === 0) { orderProfits[orderNr] = null; continue; }
+            const totalStk = order.items.reduce((s, i) => s + i.anzahl, 0);
+            const shippingCost = getShippingCost(order.versandart);
+            const paymentPct = order.betrag * 0.0299;
+            const orderFixCost = shippingCost + 0.39 + paymentPct + 0.25 + 0.15;
+            const totalVkNetto = order.items.reduce((s, i) => s + i.vkNetto, 0);
+
+            let profit = -orderFixCost;
+            for (const item of order.items) {
+                const ek = (item.ekNetto !== null && item.ekNetto !== undefined) ? item.ekNetto : 0;
+                const couponShare = totalVkNetto > 0 ? (item.vkNetto / totalVkNetto) * order.gutscheinTotal : 0;
+                const revenueNet = item.vkNetto - couponShare;
+                const adCost = (adCostPerUnit[item.sku] || 0) * item.anzahl;
+                profit += revenueNet - ek * item.anzahl - adCost;
+            }
+            orderProfits[orderNr] = Math.round(profit * 100) / 100;
+        }
+
+        const orderList = Object.entries(ordersMap);
         const totalOrders = orderList.length;
 
-        // Per-Produkt Aggregation
-        const skuStats = {};
-        for (const order of orderList) {
+        // Per-Produkt Aggregation (inkl. Profitabilität)
+        const skuStats = {}; // sku -> { orderCount, totalUnits, soloCount, coOrders, profitSum, profitCount }
+        for (const [orderNr, order] of orderList) {
             const skus = order.items.map(i => i.sku);
             const isSolo = skus.length === 1;
+            const profit = orderProfits[orderNr];
             for (const item of order.items) {
                 const { sku, anzahl } = item;
-                if (!skuStats[sku]) skuStats[sku] = { orderCount: 0, totalUnits: 0, soloCount: 0, coOrders: {} };
+                if (!skuStats[sku]) skuStats[sku] = { orderCount: 0, totalUnits: 0, soloCount: 0, coOrders: {}, profitSum: 0, profitCount: 0 };
                 const s = skuStats[sku];
                 s.orderCount++;
                 s.totalUnits += anzahl;
                 if (isSolo) s.soloCount++;
+                if (profit !== null) { s.profitSum += profit; s.profitCount++; }
                 for (const other of skus) {
                     if (other === sku) continue;
-                    s.coOrders[other] = (s.coOrders[other] || 0) + 1;
+                    if (!s.coOrders[other]) s.coOrders[other] = { count: 0, profitSum: 0, profitCount: 0 };
+                    s.coOrders[other].count++;
+                    if (profit !== null) { s.coOrders[other].profitSum += profit; s.coOrders[other].profitCount++; }
                 }
             }
         }
@@ -1354,24 +1414,27 @@ app.get('/api/warenkorb', (req, res) => {
         // Ergebnis pro Produkt aufbauen
         const products = Object.entries(skuStats).map(([sku, s]) => {
             const topCombos = Object.entries(s.coOrders)
-                .map(([otherSku, coCount]) => {
+                .map(([otherSku, co]) => {
                     const other = skuStats[otherSku];
                     const suppA = s.orderCount / totalOrders;
                     const suppB = other ? other.orderCount / totalOrders : 0;
-                    const suppAB = coCount / totalOrders;
+                    const suppAB = co.count / totalOrders;
                     const lift = suppA > 0 && suppB > 0 ? suppAB / (suppA * suppB) : 0;
-                    const confidence = s.orderCount > 0 ? (coCount / s.orderCount) * 100 : 0;
+                    const confidence = s.orderCount > 0 ? (co.count / s.orderCount) * 100 : 0;
+                    const avgProfit = co.profitCount > 0 ? co.profitSum / co.profitCount : null;
                     return {
                         sku: otherSku,
                         name: prodMap[otherSku] || otherSku,
-                        coCount,
+                        coCount: co.count,
                         lift: Math.round(lift * 100) / 100,
                         confidence: Math.round(confidence * 10) / 10,
+                        avgOrderProfit: avgProfit !== null ? Math.round(avgProfit * 100) / 100 : null,
                     };
                 })
                 .sort((a, b) => b.lift - a.lift)
                 .slice(0, 5);
 
+            const avgOrderProfit = s.profitCount > 0 ? Math.round((s.profitSum / s.profitCount) * 100) / 100 : null;
             return {
                 sku,
                 name: prodMap[sku] || sku,
@@ -1380,47 +1443,57 @@ app.get('/api/warenkorb', (req, res) => {
                 avgQtyPerOrder: Math.round((s.totalUnits / s.orderCount) * 100) / 100,
                 soloCount: s.soloCount,
                 soloRate: Math.round((s.soloCount / s.orderCount) * 1000) / 10,
+                avgOrderProfit,
                 topCombos,
             };
         }).sort((a, b) => b.orderCount - a.orderCount);
 
-        // Globale Top-Paare nach Lift (min. 3 gemeinsame Bestellungen)
-        const pairCounts = {};
-        for (const order of orderList) {
+        // Globale Top-Paare nach Lift (min. 3 gem. Bestellungen) — inkl. Profitabilität
+        const pairData = {}; // key -> { count, profitSum, profitCount }
+        for (const [orderNr, order] of orderList) {
             const skus = [...new Set(order.items.map(i => i.sku))].sort();
+            const profit = orderProfits[orderNr];
             for (let i = 0; i < skus.length; i++) {
                 for (let j = i + 1; j < skus.length; j++) {
                     const key = skus[i] + '||' + skus[j];
-                    pairCounts[key] = (pairCounts[key] || 0) + 1;
+                    if (!pairData[key]) pairData[key] = { count: 0, profitSum: 0, profitCount: 0 };
+                    pairData[key].count++;
+                    if (profit !== null) { pairData[key].profitSum += profit; pairData[key].profitCount++; }
                 }
             }
         }
 
         const MIN_SUPPORT = 3;
-        const topPairs = Object.entries(pairCounts)
-            .filter(([, count]) => count >= MIN_SUPPORT)
-            .map(([key, count]) => {
+        const topPairs = Object.entries(pairData)
+            .filter(([, d]) => d.count >= MIN_SUPPORT)
+            .map(([key, d]) => {
                 const [skuA, skuB] = key.split('||');
                 const sA = skuStats[skuA];
                 const sB = skuStats[skuB];
                 const suppA = sA ? sA.orderCount / totalOrders : 0;
                 const suppB = sB ? sB.orderCount / totalOrders : 0;
-                const suppAB = count / totalOrders;
+                const suppAB = d.count / totalOrders;
                 const lift = suppA > 0 && suppB > 0 ? suppAB / (suppA * suppB) : 0;
+                const avgOrderProfit = d.profitCount > 0 ? Math.round((d.profitSum / d.profitCount) * 100) / 100 : null;
                 return {
                     skuA, nameA: prodMap[skuA] || skuA,
                     skuB, nameB: prodMap[skuB] || skuB,
-                    count,
+                    count: d.count,
                     lift: Math.round(lift * 100) / 100,
-                    confAB: sA && sA.orderCount > 0 ? Math.round((count / sA.orderCount) * 1000) / 10 : 0,
-                    confBA: sB && sB.orderCount > 0 ? Math.round((count / sB.orderCount) * 1000) / 10 : 0,
+                    confAB: sA && sA.orderCount > 0 ? Math.round((d.count / sA.orderCount) * 1000) / 10 : 0,
+                    confBA: sB && sB.orderCount > 0 ? Math.round((d.count / sB.orderCount) * 1000) / 10 : 0,
+                    avgOrderProfit,
                 };
             })
             .sort((a, b) => b.lift - a.lift)
             .slice(0, 25);
 
-        const multiItemOrders = orderList.filter(o => o.items.length > 1).length;
-        const totalUnitsAll = orderList.reduce((s, o) => s + o.items.reduce((ss, i) => ss + i.anzahl, 0), 0);
+        const allOrderValues = Object.values(ordersMap);
+        const multiItemOrders = allOrderValues.filter(o => o.items.length > 1).length;
+        const totalUnitsAll = allOrderValues.reduce((s, o) => s + o.items.reduce((ss, i) => ss + i.anzahl, 0), 0);
+        const profitableOrders = Object.values(orderProfits).filter(p => p !== null && p > 0).length;
+        const allProfits = Object.values(orderProfits).filter(p => p !== null);
+        const avgOrderProfit = allProfits.length > 0 ? Math.round((allProfits.reduce((s, p) => s + p, 0) / allProfits.length) * 100) / 100 : null;
 
         res.json({
             success: true,
@@ -1429,6 +1502,9 @@ app.get('/api/warenkorb', (req, res) => {
                 multiItemOrders,
                 multiItemRate: totalOrders > 0 ? Math.round((multiItemOrders / totalOrders) * 1000) / 10 : 0,
                 avgBasketSize: totalOrders > 0 ? Math.round((totalUnitsAll / totalOrders) * 100) / 100 : 0,
+                profitableOrders,
+                profitableRate: totalOrders > 0 ? Math.round((profitableOrders / totalOrders) * 1000) / 10 : 0,
+                avgOrderProfit,
             },
             products,
             topPairs,

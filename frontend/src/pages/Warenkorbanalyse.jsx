@@ -1,11 +1,12 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import axios from 'axios';
-import { ShoppingCart, ChevronDown, ChevronUp, TrendingUp, Package, Users } from 'lucide-react';
+import { ShoppingCart, ChevronDown, ChevronUp, TrendingUp, Package, Users, Euro } from 'lucide-react';
 
 const fmt = (v, d = 1) => {
     if (v === null || v === undefined || isNaN(v)) return '–';
     return new Intl.NumberFormat('de-DE', { minimumFractionDigits: d, maximumFractionDigits: d }).format(v);
 };
+const fmtEur = v => (v === null || v === undefined || isNaN(v)) ? '–' : fmt(v, 2) + ' €';
 const fmtPct = v => fmt(v) + '%';
 
 // Lift farblich einordnen
@@ -31,12 +32,31 @@ function liftLabel(lift) {
     return 'schwach';
 }
 
+// Gewinn-Ampel: rot < 0, gelb < 5, grün ≥ 5
+function profitColor(profit) {
+    if (profit === null || profit === undefined) return '#94a3b8';
+    if (profit < 0) return '#dc2626';
+    if (profit < 5) return '#d97706';
+    return '#15803d';
+}
+function ProfitBadge({ profit }) {
+    if (profit === null || profit === undefined) return <span style={{ color: '#94a3b8', fontSize: '0.78rem' }}>–</span>;
+    const color = profitColor(profit);
+    const bg = profit < 0 ? '#fef2f2' : profit < 5 ? '#fffbeb' : '#f0fdf4';
+    const border = profit < 0 ? '#fca5a5' : profit < 5 ? '#fde68a' : '#86efac';
+    return (
+        <span style={{ fontSize: '0.78rem', fontWeight: 700, color, background: bg, border: `1px solid ${border}`, padding: '0.15rem 0.45rem', borderRadius: 999, whiteSpace: 'nowrap' }}>
+            {profit >= 0 ? '+' : ''}{fmtEur(profit)}
+        </span>
+    );
+}
+
 function SoloBar({ rate }) {
     const color = rate > 85 ? '#6b7280' : rate > 60 ? '#d97706' : '#10b981';
     return (
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
             <div style={{ flex: 1, height: 6, background: '#e5e7eb', borderRadius: 3, minWidth: 50 }}>
-                <div style={{ width: `${rate}%`, height: '100%', background: color, borderRadius: 3, transition: 'width 0.3s' }} />
+                <div style={{ width: `${rate}%`, height: '100%', background: color, borderRadius: 3 }} />
             </div>
             <span style={{ fontSize: '0.78rem', fontWeight: 700, color, minWidth: 38, textAlign: 'right' }}>
                 {fmt(rate)}%
@@ -67,7 +87,7 @@ export default function Warenkorbanalyse() {
     const [search, setSearch] = useState('');
     const [sort, setSort] = useState({ key: 'orderCount', desc: true });
     const [expandedSkus, setExpandedSkus] = useState({});
-    const [filter, setFilter] = useState('all'); // all | bundle | solo | multi-qty
+    const [filter, setFilter] = useState('all');
 
     useEffect(() => {
         axios.get('/api/warenkorb')
@@ -91,6 +111,7 @@ export default function Warenkorbanalyse() {
         if (filter === 'bundle') list = list.filter(p => p.soloRate < 60);
         if (filter === 'solo') list = list.filter(p => p.soloRate >= 85);
         if (filter === 'multi-qty') list = list.filter(p => p.avgQtyPerOrder >= 1.5);
+        if (filter === 'profitable') list = list.filter(p => p.avgOrderProfit !== null && p.avgOrderProfit >= 5);
         const accessor = {
             name: p => p.name,
             orderCount: p => p.orderCount,
@@ -98,6 +119,7 @@ export default function Warenkorbanalyse() {
             avgQty: p => p.avgQtyPerOrder,
             soloRate: p => p.soloRate,
             topLift: p => p.topCombos?.[0]?.lift ?? 0,
+            avgProfit: p => p.avgOrderProfit ?? -9999,
         }[sort.key] || (p => p.orderCount);
         return [...list].sort((a, b) => {
             const av = accessor(a), bv = accessor(b);
@@ -131,21 +153,22 @@ export default function Warenkorbanalyse() {
     const { meta, topPairs } = data;
 
     return (
-        <div style={{ padding: '1.5rem 2rem', maxWidth: 1500, display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+        <div style={{ padding: '1.5rem 2rem', maxWidth: 1600, display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
 
             {/* Header */}
             <div>
                 <h1 style={{ fontSize: '1.4rem', fontWeight: 700, margin: 0 }}>Warenkorbanalyse</h1>
                 <p style={{ color: '#64748b', margin: '0.3rem 0 0', fontSize: '0.88rem' }}>
-                    Beikäufe, Solo-Rate und Produktkombinationen aus {meta.totalOrders.toLocaleString('de-DE')} Bestellungen (90 Tage)
+                    Beikäufe, Solo-Rate, Produktkombinationen und Bestellgewinn aus {meta.totalOrders.toLocaleString('de-DE')} Bestellungen (90 Tage)
                 </p>
             </div>
 
             {/* Stats */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.75rem' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '0.75rem' }}>
                 <StatCard icon={ShoppingCart} label="Bestellungen analysiert" value={meta.totalOrders.toLocaleString('de-DE')} color="#4f46e5" />
                 <StatCard icon={Package} label="Multi-Produkt-Bestellungen" value={fmtPct(meta.multiItemRate)} sub={`${meta.multiItemOrders.toLocaleString('de-DE')} Bestellungen`} color="#d97706" />
                 <StatCard icon={TrendingUp} label="Ø Artikel pro Bestellung" value={fmt(meta.avgBasketSize, 2)} color="#15803d" />
+                <StatCard icon={Euro} label="Ø Bestellgewinn (inkl. Werbung)" value={fmtEur(meta.avgOrderProfit)} sub={`${fmtPct(meta.profitableRate)} profitabel`} color={meta.avgOrderProfit >= 5 ? '#15803d' : meta.avgOrderProfit >= 0 ? '#d97706' : '#dc2626'} />
                 <StatCard icon={Users} label="Bundle-Kandidaten" value={filtered.filter(p => p.soloRate < 60).length} sub="Solo-Rate < 60%" color="#7c3aed" />
             </div>
 
@@ -160,7 +183,7 @@ export default function Warenkorbanalyse() {
                         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                             <thead>
                                 <tr style={{ background: '#f8fafc' }}>
-                                    {['Produkt A', 'Produkt B', 'Gem. Bestellungen', 'Lift', 'Konf. A→B', 'Konf. B→A', 'Stärke'].map((h, i) => (
+                                    {['Produkt A', 'Produkt B', 'Gem. Best.', 'Lift', 'Konf. A→B', 'Konf. B→A', 'Ø Gewinn/Best.', 'Stärke'].map((h, i) => (
                                         <th key={i} style={{ textAlign: i < 2 ? 'left' : 'right', padding: '0.5rem 0.75rem', fontSize: '0.72rem', textTransform: 'uppercase', color: '#64748b', fontWeight: 600, borderBottom: '1px solid #e2e8f0', whiteSpace: 'nowrap' }}>{h}</th>
                                     ))}
                                 </tr>
@@ -168,12 +191,12 @@ export default function Warenkorbanalyse() {
                             <tbody>
                                 {topPairs.map((pair, i) => (
                                     <tr key={i} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                                        <td style={{ padding: '0.55rem 0.75rem', fontSize: '0.84rem', fontWeight: 500, maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                            <div style={{ fontWeight: 600 }}>{pair.nameA}</div>
+                                        <td style={{ padding: '0.55rem 0.75rem', maxWidth: 240 }}>
+                                            <div style={{ fontWeight: 600, fontSize: '0.82rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{pair.nameA}</div>
                                             <div style={{ fontSize: '0.7rem', color: '#94a3b8', fontFamily: 'monospace' }}>{pair.skuA}</div>
                                         </td>
-                                        <td style={{ padding: '0.55rem 0.75rem', fontSize: '0.84rem', maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                            <div style={{ fontWeight: 600 }}>{pair.nameB}</div>
+                                        <td style={{ padding: '0.55rem 0.75rem', maxWidth: 240 }}>
+                                            <div style={{ fontWeight: 600, fontSize: '0.82rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{pair.nameB}</div>
                                             <div style={{ fontSize: '0.7rem', color: '#94a3b8', fontFamily: 'monospace' }}>{pair.skuB}</div>
                                         </td>
                                         <td style={{ textAlign: 'right', padding: '0.55rem 0.75rem', fontSize: '0.84rem', fontWeight: 700 }}>{pair.count}×</td>
@@ -182,6 +205,9 @@ export default function Warenkorbanalyse() {
                                         </td>
                                         <td style={{ textAlign: 'right', padding: '0.55rem 0.75rem', fontSize: '0.82rem', color: '#64748b' }}>{fmtPct(pair.confAB)}</td>
                                         <td style={{ textAlign: 'right', padding: '0.55rem 0.75rem', fontSize: '0.82rem', color: '#64748b' }}>{fmtPct(pair.confBA)}</td>
+                                        <td style={{ textAlign: 'right', padding: '0.55rem 0.75rem' }}>
+                                            <ProfitBadge profit={pair.avgOrderProfit} />
+                                        </td>
                                         <td style={{ textAlign: 'right', padding: '0.55rem 0.75rem' }}>
                                             <span style={{ fontSize: '0.72rem', fontWeight: 700, color: liftColor(pair.lift), background: liftBg(pair.lift), padding: '0.15rem 0.5rem', borderRadius: 999, whiteSpace: 'nowrap' }}>
                                                 {liftLabel(pair.lift)}
@@ -193,7 +219,7 @@ export default function Warenkorbanalyse() {
                         </table>
                     </div>
                     <div style={{ padding: '0.6rem 1rem', background: '#f8fafc', borderTop: '1px solid #e2e8f0', fontSize: '0.75rem', color: '#94a3b8' }}>
-                        <strong>Lift-Erklärung:</strong> Lift = wie viel häufiger werden A+B zusammen gekauft als per Zufall erwartet. Lift 1 = kein Zusammenhang. Lift 3 = 3× häufiger als zufällig.
+                        <strong>Lift:</strong> Wie viel häufiger A+B zusammen als per Zufall. Lift 1 = kein Zusammenhang. &nbsp;|&nbsp; <strong>Gewinn:</strong> Ø Bestellgewinn (nach EK, Versand, Payment, Verpackung, Software, Werbung) bei Bestellungen die beide Produkte enthalten.
                     </div>
                 </div>
             )}
@@ -209,6 +235,7 @@ export default function Warenkorbanalyse() {
                     { key: 'bundle', label: 'Bundle-Kandidaten (Solo < 60%)' },
                     { key: 'solo', label: 'Solo-Käufer (≥ 85%)' },
                     { key: 'multi-qty', label: 'Mehrfach-Käufer (Ø ≥ 1.5)' },
+                    { key: 'profitable', label: 'Profitabel (Ø ≥ 5 €)' },
                 ].map(f => (
                     <button key={f.key} onClick={() => setFilter(f.key)} style={{
                         padding: '0.4rem 0.8rem', borderRadius: 6, fontSize: '0.78rem', fontWeight: 600,
@@ -222,7 +249,8 @@ export default function Warenkorbanalyse() {
                         {f.key !== 'all' && <span style={{ marginLeft: '0.35rem', opacity: 0.7 }}>
                             ({f.key === 'bundle' ? data.products.filter(p => p.soloRate < 60).length
                                 : f.key === 'solo' ? data.products.filter(p => p.soloRate >= 85).length
-                                    : data.products.filter(p => p.avgQtyPerOrder >= 1.5).length})
+                                : f.key === 'multi-qty' ? data.products.filter(p => p.avgQtyPerOrder >= 1.5).length
+                                : data.products.filter(p => p.avgOrderProfit !== null && p.avgOrderProfit >= 5).length})
                         </span>}
                     </button>
                 ))}
@@ -238,8 +266,9 @@ export default function Warenkorbanalyse() {
                                 <SortTh sortKey="name" align="left">Produkt</SortTh>
                                 <SortTh sortKey="orderCount">Bestellungen</SortTh>
                                 <SortTh sortKey="totalUnits">Einheiten</SortTh>
-                                <SortTh sortKey="avgQty">Ø Menge/Bestellung</SortTh>
+                                <SortTh sortKey="avgQty">Ø Menge/Best.</SortTh>
                                 <SortTh sortKey="soloRate">Solo-Rate</SortTh>
+                                <SortTh sortKey="avgProfit">Ø Gewinn/Best.</SortTh>
                                 <SortTh sortKey="topLift">Stärkste Kombi</SortTh>
                             </tr>
                         </thead>
@@ -269,15 +298,15 @@ export default function Warenkorbanalyse() {
                                             <td style={{ textAlign: 'right', padding: '0.6rem 0.75rem', fontWeight: 700, fontSize: '0.84rem' }}>{p.orderCount}</td>
                                             <td style={{ textAlign: 'right', padding: '0.6rem 0.75rem', fontSize: '0.84rem', color: '#64748b' }}>{p.totalUnits}</td>
                                             <td style={{ textAlign: 'right', padding: '0.6rem 0.75rem' }}>
-                                                <span style={{
-                                                    fontWeight: 700, fontSize: '0.84rem',
-                                                    color: p.avgQtyPerOrder >= 2 ? '#7c3aed' : p.avgQtyPerOrder >= 1.5 ? '#d97706' : '#1e293b',
-                                                }}>
+                                                <span style={{ fontWeight: 700, fontSize: '0.84rem', color: p.avgQtyPerOrder >= 2 ? '#7c3aed' : p.avgQtyPerOrder >= 1.5 ? '#d97706' : '#1e293b' }}>
                                                     {fmt(p.avgQtyPerOrder, 2)}
                                                 </span>
                                             </td>
                                             <td style={{ padding: '0.6rem 0.75rem', minWidth: 140 }}>
                                                 <SoloBar rate={p.soloRate} />
+                                            </td>
+                                            <td style={{ padding: '0.6rem 0.75rem', textAlign: 'right' }}>
+                                                <ProfitBadge profit={p.avgOrderProfit} />
                                             </td>
                                             <td style={{ padding: '0.6rem 0.75rem', textAlign: 'right' }}>
                                                 {topCombo ? (
@@ -293,25 +322,23 @@ export default function Warenkorbanalyse() {
                                         </tr>
                                         {exp && (
                                             <tr>
-                                                <td colSpan={6} style={{ padding: 0, background: '#fafbff', borderBottom: '1px solid #e2e8f0' }}>
+                                                <td colSpan={7} style={{ padding: 0, background: '#fafbff', borderBottom: '1px solid #e2e8f0' }}>
                                                     <div style={{ padding: '0.75rem 1.1rem 0.9rem 2.5rem' }}>
                                                         <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', marginBottom: '0.5rem', letterSpacing: '0.05em' }}>
                                                             Mitgekaufte Produkte (Top {p.topCombos.length})
                                                         </div>
                                                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
                                                             {p.topCombos.map((c, i) => (
-                                                                <div key={i} style={{
-                                                                    background: liftBg(c.lift),
-                                                                    border: `1.5px solid ${liftColor(c.lift)}44`,
-                                                                    borderRadius: 8, padding: '0.5rem 0.8rem',
-                                                                    minWidth: 180, maxWidth: 260,
-                                                                }}>
+                                                                <div key={i} style={{ background: liftBg(c.lift), border: `1.5px solid ${liftColor(c.lift)}44`, borderRadius: 8, padding: '0.5rem 0.8rem', minWidth: 200, maxWidth: 280 }}>
                                                                     <div style={{ fontWeight: 600, fontSize: '0.82rem', color: '#1e293b', marginBottom: '0.2rem' }}>{c.name}</div>
                                                                     <div style={{ fontSize: '0.7rem', color: '#94a3b8', fontFamily: 'monospace', marginBottom: '0.35rem' }}>{c.sku}</div>
-                                                                    <div style={{ display: 'flex', gap: '0.75rem', fontSize: '0.75rem' }}>
+                                                                    <div style={{ display: 'flex', gap: '0.75rem', fontSize: '0.75rem', flexWrap: 'wrap' }}>
                                                                         <span><span style={{ color: '#94a3b8' }}>Lift </span><strong style={{ color: liftColor(c.lift) }}>{fmt(c.lift, 2)}</strong></span>
                                                                         <span><span style={{ color: '#94a3b8' }}>Konf. </span><strong>{fmtPct(c.confidence)}</strong></span>
                                                                         <span><span style={{ color: '#94a3b8' }}>n= </span><strong>{c.coCount}</strong></span>
+                                                                        {c.avgOrderProfit !== null && (
+                                                                            <span><span style={{ color: '#94a3b8' }}>Ø Gewinn </span><strong style={{ color: profitColor(c.avgOrderProfit) }}>{c.avgOrderProfit >= 0 ? '+' : ''}{fmtEur(c.avgOrderProfit)}</strong></span>
+                                                                        )}
                                                                     </div>
                                                                 </div>
                                                             ))}
@@ -329,7 +356,7 @@ export default function Warenkorbanalyse() {
             </div>
 
             <div style={{ fontSize: '0.75rem', color: '#94a3b8', padding: '0 0.25rem' }}>
-                Nur SW6-Live-Bestellungen (Jan–Apr). Lift &gt; 1 = überdurchschnittlich häufig zusammen gekauft. Solo-Rate: Anteil Bestellungen wo nur dieses Produkt enthalten war.
+                Nur SW6-Live-Bestellungen (Jan–Apr). Gewinn = VKNetto − EKNetto − Versand − Payment − Verpackung − Software − anteilige Werbekosten (aus Q1-XLSX). Solo-Rate: Anteil Bestellungen wo nur dieses Produkt enthalten war.
             </div>
         </div>
     );
