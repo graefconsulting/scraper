@@ -1195,6 +1195,8 @@ app.get('/api/marketing', requireAuth, async (req, res) => {
                 id: p.sku,
                 name: p.name,
                 hersteller: p.hersteller,
+                menge90d: p.menge90d,
+                umsatzNetto90d: p.umsatzNetto90d,
                 tax_rate: p.mwst,
                 price_gross: p.vkBrutto,
                 price_net: vkNetto,

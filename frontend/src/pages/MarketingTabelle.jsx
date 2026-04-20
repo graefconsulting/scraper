@@ -120,12 +120,14 @@ export default function MarketingTabelle() {
     }, [data, discountPct, filterHersteller, sort]);
 
     const exportCSV = () => {
-        const headers = ['SKU', 'Produkt', 'Hersteller', 'MwSt %', 'VK Brutto', 'VK Netto',
+        const headers = ['SKU', 'Produkt', 'Hersteller', 'Menge 90T', 'Umsatz Netto 90T',
+            'MwSt %', 'VK Brutto', 'VK Netto',
             'Eff. VK Brutto', 'Eff. VK Netto', 'EK Netto', 'Rohertrag €', 'Rohertrag %',
             'Betriebskosten €', 'Betriebskosten %', 'Nettomarge €', 'Nettomarge %',
             'Break-Even ROAS', 'DTP'];
         const rows = processed.map(p => [
-            p.id, p.name, p.hersteller || '', p.tax_rate,
+            p.id, p.name, p.hersteller || '', p.menge90d ?? 0, p.umsatzNetto90d ?? 0,
+            p.tax_rate,
             p.price_gross, p.price_net,
             p.effPriceGross, p.effPriceNet,
             p.purchase_price_net,
@@ -146,12 +148,14 @@ export default function MarketingTabelle() {
     };
 
     const exportXLSX = () => {
-        const headers = ['SKU', 'Produkt', 'Hersteller', 'MwSt %', 'VK Brutto', 'VK Netto',
+        const headers = ['SKU', 'Produkt', 'Hersteller', 'Menge 90T', 'Umsatz Netto 90T',
+            'MwSt %', 'VK Brutto', 'VK Netto',
             'Eff. VK Brutto', 'Eff. VK Netto', 'EK Netto', 'Rohertrag €', 'Rohertrag %',
             'Betriebskosten €', 'Betriebskosten %', 'Nettomarge €', 'Nettomarge %',
             'Break-Even ROAS', 'DTP'];
         const rows = processed.map(p => [
-            p.id, p.name, p.hersteller || '', p.tax_rate,
+            p.id, p.name, p.hersteller || '', p.menge90d ?? 0, p.umsatzNetto90d ?? 0,
+            p.tax_rate,
             p.price_gross, p.price_net,
             p.effPriceGross, p.effPriceNet,
             p.purchase_price_net,
@@ -257,6 +261,8 @@ export default function MarketingTabelle() {
                         <tr>
                             <ColHeader label="Produkt" sortKey="name" currentSort={sort} onSort={handleSort} align="left" />
                             <ColHeader label="Hersteller" sortKey="hersteller" currentSort={sort} onSort={handleSort} align="left" />
+                            <ColHeader label="Menge 90T" sortKey="menge90d" currentSort={sort} onSort={handleSort} />
+                            <ColHeader label="Umsatz 90T" sortKey="umsatzNetto90d" currentSort={sort} onSort={handleSort} />
                             <ColHeader label="MwSt" sortKey="tax_rate" currentSort={sort} onSort={handleSort} />
                             <ColHeader label="VK Brutto" sortKey="price_gross" currentSort={sort} onSort={handleSort} />
                             <ColHeader label="VK Netto" sortKey="price_net" currentSort={sort} onSort={handleSort} />
@@ -283,6 +289,8 @@ export default function MarketingTabelle() {
                                     <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{p.id}</div>
                                 </td>
                                 <td style={{ ...tdStyle, textAlign: 'left', color: 'var(--text-muted)', fontSize: '0.8rem' }}>{p.hersteller || '—'}</td>
+                                <td style={tdNum}>{p.menge90d !== null && p.menge90d !== undefined ? fmt(p.menge90d, 0) : '—'}</td>
+                                <td style={tdNum}>{fmtEur(p.umsatzNetto90d)}</td>
                                 <td style={tdNum}>{p.tax_rate !== null ? `${p.tax_rate} %` : '—'}</td>
                                 <td style={tdNum}>{fmtEur(p.price_gross)}</td>
                                 <td style={tdNum}>{fmtEur(p.price_net)}</td>
