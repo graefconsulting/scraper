@@ -136,6 +136,17 @@ function createTables() {
             }
         });
 
+        // Users table for authentication
+        db.run(`
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                role TEXT NOT NULL CHECK(role IN ('admin', 'marketing')),
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+
         console.log("Database tables initialized.");
     });
 }

@@ -5,9 +5,14 @@ const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
 const XLSX = require('xlsx');
+const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
 const db = require('./database');
 const { importCSV } = require('./csvImporter');
 const { runResearch } = require('./research');
+
+const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret_change_in_prod';
+const SALT_ROUNDS = 10;
 
 puppeteer.use(StealthPlugin());
 const app = express();
@@ -26,12 +31,62 @@ let scrapingState = {
 // Load CSV on startup
 importCSV();
 
+// Seed default users on startup (INSERT OR IGNORE = idempotent)
+async function seedUsers() {
+    const adminPassword = process.env.ADMIN_PASSWORD || 'admin123';
+    const adminHash = await bcrypt.hash(adminPassword, SALT_ROUNDS);
+    const marketingHash = await bcrypt.hash('health_rise_26!', SALT_ROUNDS);
+    db.run('INSERT OR IGNORE INTO users (username, password_hash, role) VALUES (?, ?, ?)', ['admin', adminHash, 'admin']);
+    db.run('INSERT OR IGNORE INTO users (username, password_hash, role) VALUES (?, ?, ?)', ['proficio', marketingHash, 'marketing']);
+}
+seedUsers().catch(console.error);
+
+// ------------------------------------------------------------------
+// AUTH MIDDLEWARE + LOGIN
+// ------------------------------------------------------------------
+
+function requireAuth(req, res, next) {
+    const authHeader = req.headers['authorization'];
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return res.status(401).json({ success: false, error: 'Nicht authentifiziert.' });
+    }
+    const token = authHeader.slice(7);
+    try {
+        req.user = jwt.verify(token, JWT_SECRET);
+        next();
+    } catch (e) {
+        return res.status(401).json({ success: false, error: 'Token ungültig oder abgelaufen.' });
+    }
+}
+
+app.post('/api/auth/login', (req, res) => {
+    const { username, password } = req.body;
+    if (!username || !password) {
+        return res.status(400).json({ success: false, error: 'Username und Passwort erforderlich.' });
+    }
+    db.get('SELECT * FROM users WHERE username = ?', [username], async (err, user) => {
+        if (err || !user) {
+            return res.status(401).json({ success: false, error: 'Ungültige Zugangsdaten.' });
+        }
+        const match = await bcrypt.compare(password, user.password_hash);
+        if (!match) {
+            return res.status(401).json({ success: false, error: 'Ungültige Zugangsdaten.' });
+        }
+        const token = jwt.sign(
+            { id: user.id, username: user.username, role: user.role },
+            JWT_SECRET,
+            { expiresIn: '8h' }
+        );
+        res.json({ success: true, token, role: user.role, username: user.username });
+    });
+});
+
 // ------------------------------------------------------------------
 // API ENDPOINTS
 // ------------------------------------------------------------------
 
 // Get all products + latest scrape data for the frontend
-app.get('/api/products', (req, res) => {
+app.get('/api/products', requireAuth, (req, res) => {
     // We want the product data, and we want to join the LAST TWO scrapes to determine trend arrows.
     // To do this efficiently, we can fetch all products, and then fetch the latest 2 scrapes per product.
 
@@ -72,7 +127,7 @@ app.get('/api/products', (req, res) => {
 });
 
 // Manual trigger for CSV import
-app.post('/api/sync-csv', (req, res) => {
+app.post('/api/sync-csv', requireAuth, (req, res) => {
     importCSV();
     res.json({ success: true, message: "CSV import triggered" });
 });
@@ -220,12 +275,12 @@ async function scrapeUrlForProduct(url, pId) {
 }
 
 // Scraping progress status
-app.get('/api/scrape/status', (req, res) => {
+app.get('/api/scrape/status', requireAuth, (req, res) => {
     res.json({ success: true, ...scrapingState });
 });
 
 // Background scraping worker route
-app.post('/api/scrape/start', (req, res) => {
+app.post('/api/scrape/start', requireAuth, (req, res) => {
     if (scrapingState.isRunning) {
         return res.status(409).json({ success: false, error: 'Ein Scraping-Vorgang läuft bereits.' });
     }
@@ -267,7 +322,7 @@ app.post('/api/scrape/start', (req, res) => {
 });
 
 // Endpoint to fetch Dashboard aggregated data
-app.get('/api/dashboard', (req, res) => {
+app.get('/api/dashboard', requireAuth, (req, res) => {
     // 1. Fetch products
     db.all("SELECT * FROM products", [], (err, products) => {
         if (err) return res.status(500).json({ error: err.message, success: false });
@@ -471,7 +526,7 @@ app.get('/api/dashboard', (req, res) => {
 });
 
 // Get all Market Research Versions
-app.get('/api/research/versions', (req, res) => {
+app.get('/api/research/versions', requireAuth, (req, res) => {
     db.all(`
         SELECT run_id, MAX(created_at) as created_at
         FROM market_research 
@@ -504,7 +559,7 @@ app.get('/api/research/versions', (req, res) => {
 });
 
 // Get specific Market Research Version
-app.get('/api/research/version/:run_id', (req, res) => {
+app.get('/api/research/version/:run_id', requireAuth, (req, res) => {
     const runId = req.params.run_id;
     db.all(`
         SELECT category, result, created_at as timestamp 
@@ -530,7 +585,7 @@ app.get('/api/research/version/:run_id', (req, res) => {
 });
 
 // Get latest Market Research Results (Backward compatibility)
-app.get('/api/market-research', (req, res) => {
+app.get('/api/market-research', requireAuth, (req, res) => {
     db.all(`
         SELECT category, result, created_at as timestamp 
         FROM market_research 
@@ -565,7 +620,7 @@ function parseUploadNum(val) {
 }
 
 // Analyze uploaded Excel rows — returns diff vs. current DB (no changes made)
-app.post('/api/upload/analyze', (req, res) => {
+app.post('/api/upload/analyze', requireAuth, (req, res) => {
     const { rows } = req.body;
     if (!rows || !Array.isArray(rows)) {
         return res.status(400).json({ success: false, error: 'Keine Zeilen erhalten.' });
@@ -618,7 +673,7 @@ app.post('/api/upload/analyze', (req, res) => {
 });
 
 // Execute the confirmed import
-app.post('/api/upload/import', (req, res) => {
+app.post('/api/upload/import', requireAuth, (req, res) => {
     const { rows, removeSkus } = req.body;
     if (!rows || !Array.isArray(rows)) {
         return res.status(400).json({ success: false, error: 'Keine Zeilen.' });
@@ -671,7 +726,7 @@ app.post('/api/upload/import', (req, res) => {
 });
 
 // Trigger Market Research Run
-app.post('/api/market-research/run', (req, res) => {
+app.post('/api/market-research/run', requireAuth, (req, res) => {
     console.log("Triggered market research run...");
 
     // Background execution safely detached from HTTP Request
@@ -831,13 +886,14 @@ function getShippingCost(versandart) {
     return 4.05; // default GLS
 }
 
-app.get('/api/auswertung', (req, res) => {
-    try {
+function buildAuswertungData() {
+    return new Promise((resolve, reject) => {
+        try {
         const dataDir = path.join(__dirname, 'data');
 
         // --- 1. Parse Alle Produkte.csv (Stammdaten) ---
         const prodPath = path.join(dataDir, 'Alle Produkte.csv');
-        if (!fs.existsSync(prodPath)) return res.status(404).json({ success: false, error: 'Alle Produkte.csv nicht gefunden' });
+        if (!fs.existsSync(prodPath)) return reject(new Error('Alle Produkte.csv nicht gefunden'));
         const prodRows = parseCSV(prodPath);
         const prodMap = {};
         prodRows.forEach(r => {
@@ -1095,10 +1151,68 @@ app.get('/api/auswertung', (req, res) => {
                 });
             }
 
-            res.json({ success: true, data: results, total: results.length });
+            resolve(results);
         }); // end db.all callback
+        } catch (err) {
+            reject(err);
+        }
+    });
+}
+
+app.get('/api/auswertung', requireAuth, async (req, res) => {
+    try {
+        const results = await buildAuswertungData();
+        res.json({ success: true, data: results, total: results.length });
     } catch (err) {
         console.error('Auswertung error:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.get('/api/marketing', requireAuth, async (req, res) => {
+    try {
+        const allData = await buildAuswertungData();
+
+        const lastUpdated = await new Promise((resolve) => {
+            db.get('SELECT MAX(timestamp) as ts FROM scrapes', [], (err, row) => {
+                resolve(row?.ts || null);
+            });
+        });
+
+        const marketingData = allData.map(p => {
+            const vkNetto = p.vkNetto;
+            const ekNetto = p.ekNetto;
+            const betriebskostenStueck = p.betriebskostenStueck;
+            const betriebskostenAnteil = p.betriebskostenAnteil;
+
+            const rohertrag = (vkNetto !== null && ekNetto !== null) ? r2(vkNetto - ekNetto) : null;
+            const rohertragAnteil = (rohertrag !== null && vkNetto > 0) ? (rohertrag / vkNetto) * 100 : null;
+            const nettomarge = (rohertrag !== null && betriebskostenStueck !== null) ? r2(rohertrag - betriebskostenStueck) : null;
+            const nettomargeAnteil = (nettomarge !== null && vkNetto > 0) ? (nettomarge / vkNetto) * 100 : null;
+            const breakEvenRoas = (vkNetto !== null && nettomarge !== null && nettomarge > 0) ? r2(vkNetto / nettomarge) : null;
+
+            return {
+                id: p.sku,
+                name: p.name,
+                hersteller: p.hersteller,
+                tax_rate: p.mwst,
+                price_gross: p.vkBrutto,
+                price_net: vkNetto,
+                purchase_price_net: ekNetto,
+                dauertiefpreis: p.dauertiefpreis,
+                betriebskostenStueck,
+                betriebskostenAnteil,
+                rohertrag,
+                rohertragAnteil,
+                nettomarge,
+                nettomargeAnteil,
+                breakEvenRoas,
+            };
+        });
+
+        res.json({ success: true, data: marketingData, lastUpdated });
+    } catch (err) {
+        console.error('Marketing error:', err);
         res.status(500).json({ success: false, error: err.message });
     }
 });
@@ -1108,11 +1222,11 @@ let auswertungScrapeState = {
     isRunning: false, total: 0, completed: 0, failed: [], completedIds: []
 };
 
-app.get('/api/auswertung/scrape/status', (req, res) => {
+app.get('/api/auswertung/scrape/status', requireAuth, (req, res) => {
     res.json({ success: true, ...auswertungScrapeState });
 });
 
-app.post('/api/auswertung/scrape/start', (req, res) => {
+app.post('/api/auswertung/scrape/start', requireAuth, (req, res) => {
     if (auswertungScrapeState.isRunning || scrapingState.isRunning) {
         return res.status(409).json({ success: false, error: 'Ein Scraping-Vorgang läuft bereits.' });
     }
@@ -1259,7 +1373,7 @@ app.post('/api/auswertung/scrape/start', (req, res) => {
 // ------------------------------------------------------------------
 // WARENKORBANALYSE: Beikäufe, Solo-Rate, Basket Analysis
 // ------------------------------------------------------------------
-app.get('/api/warenkorb', (req, res) => {
+app.get('/api/warenkorb', requireAuth, (req, res) => {
     try {
         const dataDir = path.join(__dirname, 'data');
 
@@ -1511,7 +1625,7 @@ app.get('/api/warenkorb', (req, res) => {
 // ------------------------------------------------------------------
 // EMPFEHLUNGEN: Zero-revenue products from Produkte Dez-Feb.xlsx
 // ------------------------------------------------------------------
-app.get('/api/empfehlungen/zero-revenue', (req, res) => {
+app.get('/api/empfehlungen/zero-revenue', requireAuth, (req, res) => {
     try {
         const dataDir = path.join(__dirname, 'data');
 
@@ -1622,11 +1736,11 @@ app.get('/api/empfehlungen/zero-revenue', (req, res) => {
 // Scrape zero-revenue products
 let empfehlungenScrapeState = { isRunning: false, total: 0, completed: 0, failed: [], completedIds: [] };
 
-app.get('/api/empfehlungen/scrape/status', (req, res) => {
+app.get('/api/empfehlungen/scrape/status', requireAuth, (req, res) => {
     res.json({ success: true, ...empfehlungenScrapeState });
 });
 
-app.post('/api/empfehlungen/scrape/start', (req, res) => {
+app.post('/api/empfehlungen/scrape/start', requireAuth, (req, res) => {
     if (empfehlungenScrapeState.isRunning || auswertungScrapeState.isRunning || scrapingState.isRunning) {
         return res.status(409).json({ success: false, error: 'Ein Scraping-Vorgang läuft bereits.' });
     }
